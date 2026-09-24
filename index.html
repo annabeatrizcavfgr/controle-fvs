@@ -455,6 +455,15 @@
       <div id="areaPagamento"></div>
     </div>
 
+    <div class="painel" id="painelMapeamentoMedicao">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+        <h3 style="margin:0;">⚙️ Códigos de medição (UAU) → Pacote/Serviço do FVS</h3>
+        <button class="btn secundario pequeno" id="btnNovoMapeamentoMedicao">+ Novo mapeamento</button>
+      </div>
+      <div class="sub" style="margin:4px 0 12px;">Cadastre aqui a quais pacote/serviço do FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular.</div>
+      <div id="listaMapeamentoMedicao"></div>
+    </div>
+
     <div class="painel" id="painelMedicaoUau">
       <h3 style="margin-top:0;">📋 Conferência de Medição (UAU)</h3>
       <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
@@ -725,7 +734,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -4533,6 +4542,83 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
   );
 });
 
+/* ===================== Mapeamento de códigos de medição (UAU) =====================
+   Lista sempre visível (não só reativa a uma colagem) de cfg.mapeamentosMedicao — ela pode cadastrar
+   um código a qualquer momento, mesmo antes de colar qualquer tabela, e editar o pacote/serviço de um
+   já existente sem precisar excluir e recriar. */
+function renderizarMapeamentoMedicao(){
+  const area = document.getElementById("listaMapeamentoMedicao");
+  if(!area) return;
+  area.innerHTML = "";
+  if(cfg.mapeamentosMedicao.length === 0){
+    area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
+    return;
+  }
+  const lista = [...cfg.mapeamentosMedicao].sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR"));
+  lista.forEach(m => {
+    const selPacote = el("select",null,[el("option",{value:""},["(pacote excluído)"])]);
+    popularSelectPacotesAgrupado(selPacote);
+    selPacote.value = m.pacoteId;
+    const selServico = el("select",null,[]);
+    function popularServicos(){
+      selServico.innerHTML = "";
+      servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
+      if(![...selServico.options].some(o=>o.value===m.servico)) selServico.appendChild(el("option",{value:m.servico},[m.servico]));
+      selServico.value = m.servico;
+    }
+    popularServicos();
+    selPacote.addEventListener("change", () => {
+      m.pacoteId = selPacote.value;
+      popularServicos();
+      m.servico = selServico.value;
+      salvarConfig();
+    });
+    selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
+    area.appendChild(el("div",{class:"linha-servico"},[
+      el("div",{class:"info"},[
+        el("div",{class:"servico-nome"},[m.codigo]),
+        el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
+      ]),
+      el("button",{class:"btn perigo pequeno", onclick:()=>{
+        if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
+        cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
+        salvarConfig();
+        renderizarMapeamentoMedicao();
+      }},["Excluir"])
+    ]));
+  });
+}
+
+function abrirModalNovoMapeamentoMedicao(){
+  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico();
+  const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)"});
+  const overlay = el("div",{class:"modal-overlay"},[
+    el("div",{class:"modal-caixa"},[
+      el("h4",null,["Novo mapeamento de código"]),
+      inpCodigo, pacoteWrap, servicoWrap,
+      el("div",{class:"modal-acoes"},[
+        el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
+        el("button",{class:"btn pequeno", onclick:()=>{
+          const codigo = normTexto(inpCodigo.value).toUpperCase();
+          if(!codigo){ mostrarToast("Informe o código do UAU."); return; }
+          if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
+          const resultado = resolverPacoteEServico();
+          if(!resultado) return;
+          cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
+          salvarConfig();
+          fecharModal(overlay);
+          renderizarMapeamentoMedicao();
+          mostrarToast(`"${codigo}" mapeado.`);
+        }},["Salvar"])
+      ])
+    ])
+  ]);
+  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
+document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", abrirModalNovoMapeamentoMedicao);
+
 /* ===================== Conferência de Medição (UAU) =====================
    Ela cola aqui a tabela Casa × Serviço copiada do UAU/Excel (formato: 1ª coluna = casa tipo
    "QD16LT12", demais colunas = códigos de serviço tipo "S00296", células = valor medido). O app:
@@ -4611,6 +4697,7 @@ async function processarColagemMedicaoUau(){
     try{ await db.doc("medicaoUau").set(ultimaMedicaoUau); }
     catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
     document.getElementById("colaMedicaoUau").value = "";
+    renderizarMapeamentoMedicao();
     renderizarMedicaoUau();
     mostrarToast("Tabela processada e conferida.");
   });
@@ -5139,6 +5226,7 @@ function atualizarTodaUI(){
   renderizarPendencias();
   renderizarPrevisionTab();
   renderizarPagamentoTab();
+  renderizarMapeamentoMedicao();
   renderizarMedicaoUau();
   renderizarResumo();
   renderizarCompleto();
