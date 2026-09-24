@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Avanço Físico FVS — MOBUSS</title>
+<title>Controle de FVS</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
@@ -269,8 +269,8 @@
 <header class="topo">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap;">
     <div>
-      <h1 id="brandName">Avanço Físico a partir de FVS — MOBUSS</h1>
-      <p>FGR Incorporações · Controle automático de avanço de pacotes por Quadra · Casa · Sublocal</p>
+      <h1 id="brandName">Controle de FVS</h1>
+      <p>FGR Incorporações · Controle de avanço de pacotes e medições de empreiteiro</p>
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span id="whoamiSlot" style="font-size:12px;opacity:.9;white-space:nowrap;"></span>
@@ -479,7 +479,7 @@
   <!-- ABA CONSULTA (Completo + Resumo, alternados por um seletor — telas diferentes, mas ambas "buscar informação", não editar nada) -->
   <div class="aba-conteudo" id="aba-consulta">
     <div style="margin-bottom:12px;">
-      <div class="segmentado" id="segConsultaModo">
+      <div class="segmentado" id="segConsultaModo" style="display:inline-flex;">
         <button class="seg-btn ativo" data-modo="completo">Completo</button>
         <button class="seg-btn" data-modo="resumo">Resumo</button>
       </div>
@@ -747,9 +747,9 @@ function updateAuthUi(){
   const whoami = document.getElementById("whoamiSlot");
   if(whoami) whoami.textContent = CURRENT_USER ? (CURRENT_USER.email+" — "+(isPlan?"planejador":"visualizador")) : "";
   if(CURRENT_OBRA_NOME){
-    document.title = CURRENT_OBRA_NOME+" — Avanço Físico FVS";
+    document.title = CURRENT_OBRA_NOME+" — Controle de FVS";
     const brandName = document.getElementById("brandName");
-    if(brandName) brandName.textContent = "Avanço Físico a partir de FVS — MOBUSS · "+CURRENT_OBRA_NOME;
+    if(brandName) brandName.textContent = "Controle de FVS · "+CURRENT_OBRA_NOME;
   }
 }
 function loginScreenHtml(msg){
@@ -3568,7 +3568,7 @@ function agruparPorObservacao(regs){
 // Monta os controles de Pacote (+Novo pacote/vagão) e Serviço (+Novo serviço) compartilhados
 // pela resolução de uma única pendência (criarLinhaResolucao) e pela resolução em lote de vários
 // várias casas de uma vez (abrirModalResolverCasasSelecionadas) — mesma lógica de criação inline, um só lugar.
-function criarSeletorPacoteServico(){
+function criarSeletorPacoteServico(sugestao){
   const selPacote = el("select",null,[el("option",{value:""},["Pacote…"])]);
   popularSelectPacotesAgrupado(selPacote);
   selPacote.appendChild(el("option",{value:"__novo__"},["+ Novo pacote…"]));
@@ -3597,6 +3597,13 @@ function criarSeletorPacoteServico(){
     inpNovoServico.style.display = "none";
   }
   atualizarServicos();
+  // Sugestão (heurística por texto — ver sugerirPacoteServico): só pré-seleciona, ela ainda escolhe
+  // e confirma; nunca grava sozinha.
+  if(sugestao && sugestao.pacoteId){
+    selPacote.value = sugestao.pacoteId;
+    atualizarServicos();
+    if(sugestao.servico) selServico.value = sugestao.servico;
+  }
 
   selPacote.addEventListener("change", () => {
     const novo = selPacote.value === "__novo__";
@@ -4722,11 +4729,18 @@ function parseTabelaColada(texto){
   }
   const header = linhas[idxHeader];
   const codigos = header.slice(1).map(c=>c.trim()).filter(Boolean);
+  // linha de descrição (se existir) fica logo ACIMA da linha de códigos — só serve pra sugerir
+  // pacote/serviço na hora de mapear um código novo (ver sugerirPacoteServico); nunca é obrigatória.
+  const descricoes = {};
+  if(idxHeader > 0){
+    const linhaDesc = linhas[idxHeader-1];
+    codigos.forEach((cod,i) => { const d = (linhaDesc[i+1]||"").trim(); if(d) descricoes[cod] = d; });
+  }
   const dados = linhas.slice(idxHeader+1)
     .map(cols => ({ casa: cols[0].trim(), lote: extrairLote(cols[0]), valores: cols.slice(1) }))
     .filter(r => r.casa);
   if(codigos.length === 0 || dados.length === 0) return null;
-  return { codigos, linhas: dados };
+  return { codigos, linhas: dados, descricoes };
 }
 
 function codigosNaoMapeados(codigos){
@@ -4734,23 +4748,51 @@ function codigosNaoMapeados(codigos){
   return codigos.filter(c => !mapeados.has(c));
 }
 
-function abrirModalMapearCodigosMedicao(codigos, aoConcluir){
+// Sugestão de pacote/serviço por texto (sobreposição de palavras entre a descrição do código do UAU
+// e os pacote/serviço já cadastrados) — só pré-seleciona no seletor, ela sempre revisa e confirma
+// antes de vincular; nunca grava um mapeamento sozinha.
+function normalizarPalavras(texto){
+  return normTexto(texto).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .split(/[^A-Z0-9]+/).filter(w=>w.length>2);
+}
+function sugerirPacoteServico(descricao){
+  if(!descricao) return null;
+  const palavrasDesc = new Set(normalizarPalavras(descricao));
+  if(palavrasDesc.size===0) return null;
+  let melhor = null, melhorScore = 0;
+  cfg.mapeamentos.forEach(m => {
+    if(!m.servico) return;
+    const pac = cfg.pacotes.find(p=>p.id===m.pacoteId);
+    const palavrasAlvo = normalizarPalavras(m.servico+" "+(pac?pac.nome:""));
+    let score = 0;
+    palavrasAlvo.forEach(w => { if(palavrasDesc.has(w)) score++; });
+    if(score > melhorScore){ melhorScore = score; melhor = { pacoteId: m.pacoteId, servico: m.servico }; }
+  });
+  return melhor;
+}
+
+function abrirModalMapearCodigosMedicao(codigos, descricoes, aoConcluir){
   if(codigos.length === 0){ aoConcluir(); return; }
   const [codigo, ...resto] = codigos;
-  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico();
+  const descricao = (descricoes||{})[codigo];
+  const sugestao = sugerirPacoteServico(descricao);
+  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico(sugestao);
+  const infoParagrafo = [`Esse código ainda não está vinculado a nenhum pacote/serviço do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`];
+  if(descricao) infoParagrafo.push(el("br"), el("span",{style:"color:var(--cinza-700);"},[`Descrição do UAU: "${descricao}"`]));
+  if(sugestao) infoParagrafo.push(el("br"), el("span",{style:"color:var(--vinho);font-weight:600;"},["Já deixei uma sugestão pré-selecionada abaixo — confira antes de confirmar."]));
   const overlay = el("div",{class:"modal-overlay"},[
     el("div",{class:"modal-caixa"},[
       el("h4",null,[`Novo código de medição do UAU: "${codigo}"`]),
-      el("p",null,[`Esse código ainda não está vinculado a nenhum pacote/serviço do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`]),
+      el("p",null,infoParagrafo),
       pacoteWrap, servicoWrap,
       el("div",{class:"modal-acoes"},[
-        el("button",{class:"btn secundario pequeno", onclick:()=>{ fecharModal(overlay); abrirModalMapearCodigosMedicao(resto, aoConcluir); }},["Pular (ignorar este código)"]),
+        el("button",{class:"btn secundario pequeno", onclick:()=>{ fecharModal(overlay); abrirModalMapearCodigosMedicao(resto, descricoes, aoConcluir); }},["Pular (ignorar este código)"]),
         el("button",{class:"btn pequeno", onclick:()=>{
           const resultado = resolverPacoteEServico();
           if(!resultado) return;
           cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
           fecharModal(overlay);
-          abrirModalMapearCodigosMedicao(resto, aoConcluir);
+          abrirModalMapearCodigosMedicao(resto, descricoes, aoConcluir);
         }},["Vincular e continuar"])
       ])
     ])
@@ -4760,30 +4802,56 @@ function abrirModalMapearCodigosMedicao(codigos, aoConcluir){
   document.body.appendChild(overlay);
 }
 
+// chave estável por casa+código — cada colagem nova ATUALIZA o valor medido do item (se já existia),
+// preservando pago/fornecedor/data já preenchidos; nunca perde o que já foi registrado antes. Isso é
+// o que permite colar vários espelhos de medição diferentes, um de cada vez, sem um apagar o outro.
+function chaveMedicaoItem(casa, codigo){ return normTexto(casa).toUpperCase()+"__"+codigo; }
+
 async function processarColagemMedicaoUau(){
   const texto = document.getElementById("colaMedicaoUau").value;
   if(!texto.trim()){ mostrarToast("Cole a tabela copiada do UAU/Excel antes de processar."); return; }
   const tabela = parseTabelaColada(texto);
   if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
   const faltando = codigosNaoMapeados(tabela.codigos);
-  abrirModalMapearCodigosMedicao(faltando, async () => {
-    await salvarConfig();
-    ultimaMedicaoUau = { codigos: tabela.codigos, linhas: tabela.linhas, atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null };
-    try{ await db.doc("medicaoUau").set(ultimaMedicaoUau); }
-    catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
+  abrirModalMapearCodigosMedicao(faltando, tabela.descricoes, async () => {
+    await salvarConfig(); // persiste os mapeamentos de código novos (cfg.mapeamentosMedicao)
+    let novos = 0, atualizados = 0;
+    tabela.linhas.forEach(linha => {
+      tabela.codigos.forEach((codigo, i) => {
+        const bruto = (linha.valores[i]||"").trim();
+        if(!bruto || bruto === "-") return;
+        const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
+        if(!valor) return;
+        const chave = chaveMedicaoItem(linha.casa, codigo);
+        const atual = medicaoItens[chave];
+        medicaoItens[chave] = {
+          casa: linha.casa, codigo, valor,
+          pago: atual ? atual.pago : false,
+          fornecedorPago: atual ? atual.fornecedorPago : "",
+          dataPagamento: atual ? atual.dataPagamento : null,
+          atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
+        };
+        if(atual) atualizados++; else novos++;
+      });
+    });
+    await salvarMedicaoUau();
     document.getElementById("colaMedicaoUau").value = "";
     renderizarMapeamentoMedicao();
     renderizarMedicaoUau();
-    mostrarToast("Tabela processada e conferida.");
+    mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).`);
   });
 }
 
-let ultimaMedicaoUau = null; // { codigos, linhas, atualizadoEm, atualizadoPor } — ver carregarMedicaoUau/processarColagemMedicaoUau
+let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, pago, fornecedorPago, dataPagamento, atualizadoEm, atualizadoPor} }
 async function carregarMedicaoUau(){
   try{
     const snap = await db.doc("medicaoUau").get();
-    ultimaMedicaoUau = snap.exists ? snap.data() : null;
-  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); }
+    medicaoItens = snap.exists ? (snap.data().itens || {}) : {};
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; }
+}
+async function salvarMedicaoUau(){
+  try{ await db.doc("medicaoUau").set({ itens: medicaoItens }); }
+  catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
 }
 
 // Pra uma casa (quadra+lote) e um pacoteId+servico, existe algum registro de FVS concluído que bate?
@@ -4793,51 +4861,95 @@ function temFvsConcluida(lote, pacoteId, servico){
   return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
 }
 
+let buscaMedicaoUauTexto = "";
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
   if(!area || !meta) return;
-  if(!ultimaMedicaoUau){ area.innerHTML = ""; meta.textContent = ""; return; }
-  meta.textContent = `Última conferência: ${formatarData(new Date(ultimaMedicaoUau.atualizadoEm))}${ultimaMedicaoUau.atualizadoPor?" · "+ultimaMedicaoUau.atualizadoPor:""}`;
+  const todos = Object.entries(medicaoItens).map(([chave,item])=>({chave, ...item}));
+  if(todos.length === 0){ area.innerHTML = ""; meta.textContent = ""; return; }
+  meta.textContent = `${todos.length} item(ns) medido(s) no total`;
 
   const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
-  const semFvs = [];
-  let totalMedido = 0, totalOk = 0;
-  ultimaMedicaoUau.linhas.forEach(linha => {
-    ultimaMedicaoUau.codigos.forEach((codigo, i) => {
-      const bruto = (linha.valores[i]||"").trim();
-      if(!bruto || bruto === "-") return;
-      const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
-      if(!valor) return;
-      totalMedido++;
-      const mapa = mapaCodigo.get(codigo);
-      if(!mapa){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"código de serviço não vinculado a nenhum pacote/serviço"}); return; }
-      if(!linha.lote){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"casa não reconhecida (esperado formato tipo QD16LT12)"}); return; }
+  let totalOk = 0, totalPago = 0;
+  const enriquecidos = todos.map(item => {
+    const mapa = mapaCodigo.get(item.codigo);
+    const lote = extrairLote(item.casa);
+    let comFvs = false, motivo = "";
+    if(!mapa) motivo = "código não vinculado a nenhum pacote/serviço";
+    else if(!lote) motivo = "casa não reconhecida (esperado tipo QD16LT12)";
+    else if(temFvsConcluida(lote, mapa.pacoteId, mapa.servico)) comFvs = true;
+    else {
       const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
-      if(temFvsConcluida(linha.lote, mapa.pacoteId, mapa.servico)){ totalOk++; return; }
-      semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não está Encerrada`});
-    });
+      motivo = `FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não Encerrada`;
+    }
+    if(comFvs) totalOk++;
+    if(item.pago) totalPago++;
+    return { ...item, mapa, comFvs, motivo };
   });
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
-    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(totalMedido)]), el("div",{class:"rotulo"},["Itens medidos"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(todos.length)]), el("div",{class:"rotulo"},["Itens medidos"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(semFvs.length)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(todos.length-totalOk)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalPago)]), el("div",{class:"rotulo"},["Pagos"])]),
   ]));
-  if(semFvs.length){
-    area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:12px;"},[
-      el("table",{class:"tbl"},[
-        el("thead",null,[el("tr",null,[el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Valor medido"]),el("th",null,["Situação"])])]),
-        el("tbody",null, semFvs.map(item => el("tr",null,[
+
+  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código ou pacote/serviço…", value: buscaMedicaoUauTexto, style:"width:100%;max-width:360px;margin:10px 0;"});
+  inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
+  area.appendChild(inpBusca);
+
+  const busca = buscaMedicaoUauTexto.trim().toLowerCase();
+  const filtrados = !busca ? enriquecidos : enriquecidos.filter(it => {
+    const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+    return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
+      (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
+      (pacote && pacote.nome.toLowerCase().includes(busca));
+  });
+  filtrados.sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
+
+  if(filtrados.length === 0){
+    area.appendChild(el("div",{class:"msg-vazio"},["Nada encontrado com essa busca."]));
+    return;
+  }
+
+  const LIMITE = 300;
+  const mostrar = filtrados.slice(0, LIMITE);
+  area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:4px;"},[
+    el("table",{class:"tbl"},[
+      el("thead",null,[el("tr",null,[
+        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
+        el("th",null,["Situação FVS"]),el("th",null,["Pago?"]),el("th",null,["Fornecedor pago"]),el("th",null,["Data pagamento"])
+      ])]),
+      el("tbody",null, mostrar.map(item => {
+        const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
+        const chkPago = el("input",{type:"checkbox"});
+        chkPago.checked = !!item.pago;
+        const inpFornecedor = el("input",{type:"text", placeholder:"Fornecedor…", value: item.fornecedorPago||"", style:"width:140px;"});
+        const inpData = el("input",{type:"date"});
+        inpData.value = item.dataPagamento ? String(item.dataPagamento).slice(0,10) : "";
+        function salvarItem(){
+          medicaoItens[item.chave] = { ...medicaoItens[item.chave], pago: chkPago.checked, fornecedorPago: inpFornecedor.value.trim(), dataPagamento: inpData.value || null };
+          salvarMedicaoUau();
+        }
+        chkPago.addEventListener("change", () => { salvarItem(); renderizarMedicaoUau(); });
+        inpFornecedor.addEventListener("change", salvarItem);
+        inpData.addEventListener("change", salvarItem);
+        return el("tr",{class: item.pago?"linha-ok":""},[
           el("td",null,[item.casa]), el("td",null,[item.codigo]),
+          el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-          el("td",null,[el("span",{class:"badge pendente"},[item.motivo])])
-        ])))
-      ])
-    ]));
-  } else if(totalMedido > 0) {
-    area.appendChild(el("div",{class:"msg-vazio"},["✅ Todo item medido já tem FVS Encerrada correspondente."]));
+          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"])]),
+          el("td",null,[chkPago]),
+          el("td",null,[inpFornecedor]),
+          el("td",null,[inpData])
+        ]);
+      }))
+    ])
+  ]));
+  if(filtrados.length > LIMITE){
+    area.appendChild(el("div",{class:"sub",style:"padding:6px;"},[`Mostrando ${LIMITE} de ${filtrados.length} itens — use a busca acima pra refinar.`]));
   }
 }
 document.getElementById("btnProcessarMedicaoUau").addEventListener("click", processarColagemMedicaoUau);
