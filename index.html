@@ -8,7 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root{
-    --vinho:#7a1f2b; --vinho-esc:#4d1119; --vinho-claro:#f7e9ea;
+    --vinho:#7a1f2b; --vinho-esc:#4d1119; --vinho-medio:#631a24; --vinho-claro:#f7e9ea;
     --verde:#1c8a4c; --verde-claro:#e5f6ec;
     --amarelo:#b8860b; --amarelo-claro:#fdf3d9;
     --vermelho:#b3261e; --vermelho-claro:#fbe9e8;
@@ -18,7 +18,7 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;background:var(--cinza-100);color:var(--cinza-900);font-family:"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;}
-  header.topo{background:linear-gradient(135deg,var(--vinho-esc),var(--vinho));color:#fff;padding:14px 24px;box-shadow:var(--sombra);}
+  header.topo{background:var(--vinho-medio);color:#fff;padding:14px 24px;box-shadow:var(--sombra);}
   header.topo h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.2px;}
   header.topo p{margin:3px 0 0;font-size:12px;opacity:.85;}
 
@@ -245,7 +245,7 @@
   .modal-overlay{position:fixed;inset:0;background:rgba(20,30,50,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
   /* Overlay de login/obra/usuários: fundo sólido (não deixa ver o app por trás, diferente dos
      modais internos do app, que continuam com fundo semitransparente de propósito). */
-  #authModalOverlay{background:linear-gradient(135deg,var(--vinho-esc),var(--vinho));}
+  #authModalOverlay{background:var(--vinho-medio);}
   .modal-caixa{background:#fff;border-radius:10px;padding:20px 22px;box-shadow:var(--sombra);max-width:420px;width:100%;}
   .modal-caixa.larga{max-width:540px;}
   .modal-caixa h4{margin:0 0 10px;font-size:14.5px;color:var(--cinza-900);}
