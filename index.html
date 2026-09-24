@@ -556,11 +556,19 @@ function createRemoteDb(){
       },
       async set(value){
         if(!checkWritable()) return;
-        await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"set", data:value})});
+        const r = await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"set", data:value})});
+        if(!r.ok){
+          const j = await r.json().catch(()=>({}));
+          throw new Error("Falha ao salvar (HTTP "+r.status+"): "+(j.error||"erro desconhecido"));
+        }
       },
       async delete(){
         if(!checkWritable()) return;
-        await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"delete"})});
+        const r = await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"delete"})});
+        if(!r.ok){
+          const j = await r.json().catch(()=>({}));
+          throw new Error("Falha ao excluir (HTTP "+r.status+"): "+(j.error||"erro desconhecido"));
+        }
       },
     };
   }
@@ -571,7 +579,8 @@ function createRemoteDb(){
       async add(value){
         if(!checkWritable()) return { id: null };
         const r = await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"add", data:value})});
-        const j = await r.json();
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error("Falha ao salvar (HTTP "+r.status+"): "+(j.error||"erro desconhecido"));
         return { id: j.id };
       },
       orderBy(field, dir){ state.field=field; state.dir=dir||"asc"; return this; },
@@ -1408,7 +1417,12 @@ function vagaoOuCriar(nome){
 }
 
 async function salvarConfig(){
-  await db.doc("cfg").set(cfg);
+  try{
+    await db.doc("cfg").set(cfg);
+  }catch(e){
+    mostrarToast(`⚠️ Falha ao salvar: ${e && e.message ? e.message : e} — a alteração pode não ter sido gravada, tente de novo.`);
+    throw e;
+  }
   // Fora de uma edição de Cadastro pendente, o que acabou de ser salvo JÁ é o novo "último salvo" —
   // mantém a baseline sempre em dia com ações de commit imediato (resolver pendência, avanço manual,
   // etc.), senão ela ficaria presa no snapshot antigo e salvarConfigSemCadastroSujo() apagaria essas
@@ -1432,7 +1446,12 @@ function capturarCadastroBaseline(){
 async function salvarConfigSemCadastroSujo(){
   if(cadastroSujo && cadastroBaseline){
     const paraSalvar = { ...cfg, vagoes: cadastroBaseline.vagoes, pacotes: cadastroBaseline.pacotes, mapeamentos: cadastroBaseline.mapeamentos };
-    await db.doc("cfg").set(paraSalvar);
+    try{
+      await db.doc("cfg").set(paraSalvar);
+    }catch(e){
+      mostrarToast(`⚠️ Falha ao salvar: ${e && e.message ? e.message : e} — a alteração pode não ter sido gravada, tente de novo.`);
+      throw e;
+    }
     return;
   }
   await salvarConfig();
@@ -2238,12 +2257,24 @@ function base64ParaArrayBuffer(base64){
   for(let i=0; i<binario.length; i++) bytes[i] = binario.charCodeAt(i);
   return bytes.buffer;
 }
+// A Vercel recusa o corpo da requisicao acima de uns poucos MB — um .xlsx grande, depois de virar
+// base64 (~33% maior), pode passar desse limite. Sem esse aviso, o fetch() abaixo falhava (403/413)
+// em silencio: a planilha parecia ter sido enviada, mas nunca era realmente gravada, e sumia ao
+// recarregar a pagina — foi exatamente o que aconteceu no teste dela.
+const LIMITE_ARQUIVO_CACHE_BYTES = 3 * 1024 * 1024;
 async function salvarArquivoCache(nome, arrayBuffer){
+  if(arrayBuffer.byteLength > LIMITE_ARQUIVO_CACHE_BYTES){
+    mostrarToast(`⚠️ "${nome}" tem ${(arrayBuffer.byteLength/1024/1024).toFixed(1)}MB — grande demais pra ficar salvo compartilhado entre todo mundo (limite ~3MB). Os dados foram processados nesta tela, mas quem recarregar a página (ou outra pessoa) não vai ver esse upload.`);
+    return;
+  }
   try{
     await db.doc("arquivosMobuss/"+encodeURIComponent(nome)).set({
       nome, dadosBase64: arrayBufferParaBase64(arrayBuffer), salvoEm: Date.now()
     });
-  }catch(e){ console.error("Falha ao salvar arquivo em cache:", e); }
+  }catch(e){
+    console.error("Falha ao salvar arquivo em cache:", e);
+    mostrarToast(`⚠️ Falha ao salvar "${nome}" compartilhado: ${e && e.message ? e.message : e}`);
+  }
 }
 async function listarArquivosCache(){
   try{
