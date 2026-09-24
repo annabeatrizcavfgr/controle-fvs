@@ -464,12 +464,6 @@
       <div id="listaMapeamentoMedicao"></div>
     </div>
 
-    <div class="painel" id="painelFvsAvulsas">
-      <h3 style="margin-top:0;">FVS Avulsas</h3>
-      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">FVS do MOBUSS marcadas como "avulsas" na aba Avanço Físico (não fecham nenhum pacote) — confirme aqui, ocorrência por ocorrência, na hora da medição. Confirmar aqui não conta como avanço físico nem entra no Prevision.</div>
-      <div id="areaFvsAvulsas"></div>
-    </div>
-
     <div class="painel" id="painelMedicaoUau">
       <h3 style="margin-top:0;">Conferência de Medição (UAU)</h3>
       <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
@@ -1224,9 +1218,7 @@ let cfg = {
   knownSublocais: [...SUBLOCAIS_SEED],
   versoes: [],             // {id, data (ISO), rotulo, chaves:[...]} — snapshots arquivados, do mais antigo pro mais recente
   statusServico: {},        // { [chaveRegra]: {previsionLancado, previsionData, mesPagamento} } — ver chaveRegra()
-  mapeamentosMedicao: [],   // {id, codigo (ex.: "S00296"), tipo:"pacote"|"avulso", pacoteId, servico, formulario} — ver Conferência de Medição (UAU)
-  formulariosAvulsos: [],   // string[] — formulários do MOBUSS que não fecham nenhum pacote, só arquivados pra confirmar na medição
-  confirmacoesAvulsas: {}   // { [chaveAvulsa]: {confirmado, data} } — ver chaveAvulsa()
+  mapeamentosMedicao: []    // {id, codigo (ex.: "S00296"), pacoteId, servico} — ver Conferência de Medição (UAU)
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -1268,8 +1260,6 @@ async function carregarConfig(){
       cfg.versoes = parsed.versoes || [];
       cfg.statusServico = parsed.statusServico || {};
       cfg.mapeamentosMedicao = parsed.mapeamentosMedicao || [];
-      cfg.formulariosAvulsos = parsed.formulariosAvulsos || [];
-      cfg.confirmacoesAvulsas = parsed.confirmacoesAvulsas || {};
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
       const nomesCorrigidos = corrigirPacotesOrfaos();
@@ -1515,6 +1505,16 @@ function chaveRegra(pacoteId, casa, sublocal, formulario, observacao){
 
 function statusDoServico(chave){
   return cfg.statusServico[chave] || { previsionLancado:false, previsionData:null, mesPagamento:"" };
+}
+
+// Pacote marcado "Sem avanço" (ver checkbox no Cadastro) — continua aparecendo normalmente em
+// Prevision/Completo/Resumo/Pagamento e na Conferência de Medição (pra medição, um pacote assim é
+// igual a qualquer outro: tem FVS ou não tem); só ganha o selo "SEM AVANÇO" na aba Prevision, pra
+// lembrar que aquilo ali não deveria ser lançado no Prevision de verdade — só serve pra ela saber
+// que chegou e pra bater com a Conferência de Medição.
+function regraSemPrevision(r){
+  const pac = cfg.pacotes.find(p=>p.id===r.pacoteId);
+  return !!(pac && pac.semPrevision);
 }
 
 function atualizarStatusServico(chave, mudancas){
@@ -1981,11 +1981,10 @@ function recalcularTudo(){
     return cfg.mapeamentos.some(m => m.formulario === reg.formulario && regraCombinaObservacao(m, reg) && regraCombinaCasa(m, reg));
   }
 
-  // Pendência: formulário (ou uma variação específica dele, por observação) sem regra configurada
-  // — formulário marcado como "avulso" nunca vira pendência aqui; fica arquivado à parte (ver
-  // "FVS Avulsas", em Controle de Medições) já que por definição nunca vai fechar pacote nenhum.
+  // Pendência: formulário (ou uma variação específica dele, por observação) sem regra configurada.
+  // FVS que só existem pra comprovar pagamento (nunca fecham avanço físico de verdade) também passam
+  // por aqui — resolva pra um pacote marcado "Sem avanço" no Cadastro (ver checkbox no pacote).
   dados.registros.forEach(reg => {
-    if(cfg.formulariosAvulsos.includes(reg.formulario)) return;
     if(!registroTemRegra(reg)){
       const chave = reg.formulario;
       if(!pendencias.semPacote.has(chave)) pendencias.semPacote.set(chave, []);
@@ -3042,6 +3041,18 @@ function construirNoPacote(pac, busca){
         });
         return sel;
       })(),
+      (()=>{
+        const chk = el("input",{type:"checkbox"});
+        chk.checked = !!pac.semPrevision;
+        chk.addEventListener("click", e=>e.stopPropagation());
+        chk.addEventListener("change", ()=>{
+          pac.semPrevision = chk.checked;
+          marcarCadastroSujo(); renderizarArvoreCadastro();
+        });
+        const lbl = el("label",{style:"display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--cinza-700);white-space:nowrap;cursor:pointer;", title:"Esse pacote aparece na aba Prevision com o selo \"SEM AVANÇO\" — usa isso pra FVS que só servem pra comprovar pagamento (medição), sem contar como avanço físico de verdade."},[chk,"Sem avanço"]);
+        lbl.addEventListener("click", e=>e.stopPropagation());
+        return lbl;
+      })(),
       el("button",{class:"btn perigo pequeno", onclick:(e)=>{ e.stopPropagation();
         modalConfirmar("Remover pacote", `Remover o pacote "${pac.nome}"?`+(servicos.length?` Os ${servicos.length} serviço(s) dele também serão removidos.`:""), ()=>{
           cfg.pacotes = cfg.pacotes.filter(p=>p.id!==pac.id);
@@ -3758,17 +3769,7 @@ function formularioResolucaoForm(formulario, regs){
     bloco.style.display = mostrando ? "none" : "block";
     e.target.textContent = mostrando ? "Ver variações" : "Ocultar variações";
   }},["Ver variações"]);
-  // "Avulso": pra FVS que nunca vão fechar pacote nenhum (só existem pra comprovar pagamento) —
-  // tira da lista de pendências e arquiva em "FVS Avulsas" (Controle de Medições), onde ela confirma
-  // ocorrência por ocorrência na hora da medição, sem isso virar avanço físico nem ir pro Prevision.
-  const btnAvulso = el("button",{class:"btn secundario pequeno", title:"Essa FVS não fecha nenhum pacote — só serve pra comprovar pagamento", onclick: () => {
-    if(!confirm(`Marcar "${formulario}" como avulso? Ele sai da lista de pendências e passa a ficar arquivado em "FVS Avulsas" (aba Controle de Medições), pra você confirmar ocorrência por ocorrência na hora da medição — sem virar avanço físico nem entrar no Prevision.`)) return;
-    const set = new Set(cfg.formulariosAvulsos); set.add(formulario); cfg.formulariosAvulsos = [...set];
-    salvarConfig();
-    mostrarToast(`"${formulario.length>50?formulario.slice(0,50)+"…":formulario}" marcado como avulso.`);
-    recalcularTudo();
-  }},["Avulso (só pagamento)"]);
-  const linha = criarLinhaResolucao(formulario, undefined, "Resolver todos", [btnToggle, btnAvulso], undefined, regs.map(r=>r.casa), regs);
+  const linha = criarLinhaResolucao(formulario, undefined, "Resolver todos", [btnToggle], undefined, regs.map(r=>r.casa), regs);
   return el("div",null,[linha, blocoVariacoes(formulario, regs)]);
 }
 
@@ -3805,7 +3806,9 @@ function renderizarChecklistSemana(){
       acaoTexto:"Resolver ↓", acaoAlvo:"painelPendenciasSemana"});
   }
 
-  // Passo 3 — serviços novos pra lançar no Prevision
+  // Passo 3 — serviços novos pra lançar no Prevision (pacotes "Sem avanço" também aparecem aqui e
+  // na aba Prevision — só ficam marcados com o selo "SEM AVANÇO", pra ela saber que chegaram sem
+  // precisar lançar de verdade no Prevision externo).
   const chavesServicoNovas = regrasConcluidas.filter(r => !baselineChavesServico().has(r.chave));
   const novosComOk = chavesServicoNovas.filter(r=>statusDoServico(r.chave).previsionLancado).length;
   if(!arquivoInfo){
@@ -4285,7 +4288,7 @@ function linhaPrevisaoRegra(r){
   const tr = el("tr",{class: status.previsionLancado ? "linha-ok" : ""});
   tr.appendChild(el("td",null,[r.casa + (r.sublocal && r.sublocal!==SEM_SUBLOCAL ? ` (${r.sublocal})` : "")]));
   tr.appendChild(el("td",null,[badgeStatusPacote(r)]));
-  tr.appendChild(el("td",null,[r.servico]));
+  tr.appendChild(el("td",null, regraSemPrevision(r) ? [r.servico, " ", el("span",{class:"badge pendente",title:"Esse pacote está marcado \"Sem avanço\" no Cadastro — aparece aqui só pra você saber que chegou, mas não deveria ser lançado no Prevision de verdade."},["SEM AVANÇO"])] : [r.servico]));
   tr.appendChild(el("td",null,[r.empresa || "—"]));
   tr.appendChild(el("td",null,[r.data ? formatarData(r.data) : "—"]));
 
@@ -4564,75 +4567,6 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
   );
 });
 
-/* ===================== FVS Avulsas =====================
-   Formulários marcados como "avulso" em Pendências (Avanço Físico) — não fecham pacote nenhum, só
-   existem pra comprovar pagamento. Aqui ela confirma ocorrência por ocorrência (por casa/sublocal),
-   olhando direto dados.registros (a exportação atual do MOBUSS) — confirmar aqui NÃO conta como
-   avanço físico nem entra no Prevision, é só uma marca própria pra hora da medição. */
-function chaveAvulsa(formulario, casa, sublocal, observacao){
-  return [formulario, casa, sublocal||SEM_SUBLOCAL, observacao||""].join("__");
-}
-function fvsAvulsaConfirmada(lote, formulario){
-  return Object.entries(cfg.confirmacoesAvulsas).some(([chave, status]) => {
-    if(!status.confirmado) return false;
-    const partes = chave.split("__");
-    return partes[0] === formulario && extrairLote(partes[1]) === lote;
-  });
-}
-function renderizarFvsAvulsas(){
-  const area = document.getElementById("areaFvsAvulsas");
-  if(!area) return;
-  area.innerHTML = "";
-  if(cfg.formulariosAvulsos.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},['Nenhuma FVS marcada como avulsa ainda — na aba "Avanço Físico", em Pendências, use o botão "Avulso (só pagamento)" num formulário que não fecha pacote nenhum.']));
-    return;
-  }
-  cfg.formulariosAvulsos.forEach(formulario => {
-    const regs = dados.registros.filter(r => r.formulario === formulario);
-    const corpo = el("div",{class:"corpo aberto"});
-    const confirmadas = regs.filter(r => (cfg.confirmacoesAvulsas[chaveAvulsa(formulario, r.casa, r.sublocal, r.observacao)]||{}).confirmado).length;
-    const grupo = el("div",{class:"grupo-pendencia"},[
-      el("div",{class:"cab", onclick:()=>corpo.classList.toggle("aberto")},[
-        el("div",{class:"titulo"},[formulario, el("span",{class:"badge azul",style:"margin-left:8px;"},[confirmadas+"/"+regs.length+" confirmada(s)"])]),
-        el("button",{class:"btn perigo pequeno", onclick:(e)=>{
-          e.stopPropagation();
-          if(!confirm(`Desmarcar "${formulario}" como avulso? Ele volta a aparecer como pendência normal em Avanço Físico.`)) return;
-          cfg.formulariosAvulsos = cfg.formulariosAvulsos.filter(f=>f!==formulario);
-          salvarConfig();
-          recalcularTudo();
-        }},["Desmarcar avulso"])
-      ]),
-      corpo
-    ]);
-    if(regs.length === 0){
-      corpo.appendChild(el("div",{class:"sub"},["Nenhuma ocorrência desse formulário na exportação atual do MOBUSS."]));
-    } else {
-      corpo.appendChild(el("div",{class:"tabela-wrap"},[
-        el("table",{class:"tbl"},[
-          el("thead",null,[el("tr",null,[el("th",null,["Casa"]),el("th",null,["Sublocal"]),el("th",null,["Data"]),el("th",null,["Confirmado?"])])]),
-          el("tbody",null, regs.map(r => {
-            const chave = chaveAvulsa(formulario, r.casa, r.sublocal, r.observacao);
-            const status = cfg.confirmacoesAvulsas[chave] || {confirmado:false};
-            const chk = el("input",{type:"checkbox"});
-            chk.checked = !!status.confirmado;
-            chk.addEventListener("change", () => {
-              cfg.confirmacoesAvulsas[chave] = { confirmado: chk.checked, data: chk.checked ? new Date().toISOString() : null };
-              salvarConfig();
-              renderizarFvsAvulsas();
-            });
-            return el("tr",{class: status.confirmado?"linha-ok":""},[
-              el("td",null,[r.casa]), el("td",null,[r.sublocal||SEM_SUBLOCAL]),
-              el("td",null,[r.data?formatarData(r.data):""]),
-              el("td",null,[chk])
-            ]);
-          }))
-        ])
-      ]));
-    }
-    area.appendChild(grupo);
-  });
-}
-
 /* ===================== Mapeamento de códigos de medição (UAU) =====================
    Lista sempre visível (não só reativa a uma colagem) de cfg.mapeamentosMedicao — ela pode cadastrar
    um código a qualquer momento, mesmo antes de colar qualquer tabela, e editar o pacote/serviço de um
@@ -4643,53 +4577,30 @@ function renderizarFvsAvulsas(){
 // Formulário Avulso (pra FVS que nunca fecham pacote, só existem pra comprovar pagamento — ver
 // "FVS Avulsas"). `alvo` é mutado direto ({tipo, pacoteId, servico, formulario}); onChange() roda
 // depois de qualquer edição, e quem chama decide se isso já salva/re-renderiza ou só guarda rascunho.
-function criarSeletorAlvoMedicao(alvo, onChange){
-  alvo.tipo = alvo.tipo === "avulso" ? "avulso" : "pacote";
-  const segPacote = el("button",{class:"seg-btn"+(alvo.tipo==="pacote"?" ativo":"")},["Pacote"]);
-  const segAvulso = el("button",{class:"seg-btn"+(alvo.tipo==="avulso"?" ativo":"")},["Avulso"]);
-  const seg = el("div",{class:"segmentado"},[segPacote, segAvulso]);
-
-  const selPacote = el("select",null,[]);
+function linhaMapeamentoMedicao(m){
+  const selPacote = el("select",null,[el("option",{value:""},["(pacote excluído)"])]);
   popularSelectPacotesAgrupado(selPacote);
-  if(alvo.pacoteId) selPacote.value = alvo.pacoteId;
+  selPacote.value = m.pacoteId;
   const selServico = el("select",null,[]);
   function popularServicos(){
     selServico.innerHTML = "";
     servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
-    if(alvo.servico && ![...selServico.options].some(o=>o.value===alvo.servico)) selServico.appendChild(el("option",{value:alvo.servico},[alvo.servico]));
-    selServico.value = alvo.servico || "";
+    if(m.servico && ![...selServico.options].some(o=>o.value===m.servico)) selServico.appendChild(el("option",{value:m.servico},[m.servico]));
+    selServico.value = m.servico || "";
   }
   popularServicos();
-  const wrapPacote = el("div",{style:"display:flex;gap:6px;"},[selPacote, selServico]);
-
-  const selAvulso = el("select",null,[el("option",{value:""},["Formulário avulso…"])]);
-  cfg.formulariosAvulsos.forEach(f => selAvulso.appendChild(el("option",{value:f},[f.length>50?f.slice(0,50)+"…":f])));
-  if(alvo.formulario) selAvulso.value = alvo.formulario;
-  const wrapAvulso = el("div",null,[selAvulso]);
-
-  function atualizarVisibilidade(){
-    wrapPacote.style.display = alvo.tipo==="pacote" ? "" : "none";
-    wrapAvulso.style.display = alvo.tipo==="avulso" ? "" : "none";
-    segPacote.classList.toggle("ativo", alvo.tipo==="pacote");
-    segAvulso.classList.toggle("ativo", alvo.tipo==="avulso");
-  }
-  atualizarVisibilidade();
-
-  segPacote.addEventListener("click", () => { alvo.tipo = "pacote"; atualizarVisibilidade(); onChange(); });
-  segAvulso.addEventListener("click", () => { alvo.tipo = "avulso"; atualizarVisibilidade(); onChange(); });
-  selPacote.addEventListener("change", () => { alvo.pacoteId = selPacote.value; popularServicos(); alvo.servico = selServico.value; onChange(); });
-  selServico.addEventListener("change", () => { alvo.servico = selServico.value; onChange(); });
-  selAvulso.addEventListener("change", () => { alvo.formulario = selAvulso.value; onChange(); });
-
-  return el("div",{style:"display:flex;flex-direction:column;gap:6px;margin-top:4px;"},[seg, wrapPacote, wrapAvulso]);
-}
-
-function linhaMapeamentoMedicao(m){
-  const seletor = criarSeletorAlvoMedicao(m, () => { salvarConfig(); renderizarMapeamentoMedicao(); });
+  selPacote.addEventListener("change", () => {
+    m.pacoteId = selPacote.value;
+    popularServicos();
+    m.servico = selServico.value;
+    salvarConfig();
+    renderizarMapeamentoMedicao(); // muda de grupo
+  });
+  selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
   return el("div",{class:"linha-servico"},[
     el("div",{class:"info"},[
       el("div",{class:"servico-nome"},[m.codigo]),
-      seletor
+      el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
     ]),
     el("button",{class:"btn perigo pequeno", onclick:()=>{
       if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
@@ -4701,23 +4612,31 @@ function linhaMapeamentoMedicao(m){
 }
 
 // linha nova em edição — some da tela assim que o código é confirmado (vira uma linha normal,
-// já dentro do grupo escolhido) ou some se ela clicar noutro lugar sem preencher nada.
-let novaLinhaMapeamentoMedicao = null; // {tipo, pacoteId, servico, formulario} enquanto ainda não tem código confirmado
+// já dentro do grupo do pacote escolhido) ou some se ela clicar noutro lugar sem preencher nada.
+let novaLinhaMapeamentoMedicao = null; // {pacoteId, servico} enquanto ainda não tem código confirmado
 function linhaNovaMapeamentoMedicao(){
   const rascunho = novaLinhaMapeamentoMedicao;
   const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)", style:"margin-bottom:4px;"});
-  const seletor = criarSeletorAlvoMedicao(rascunho, () => {});
+  const selPacote = el("select",null,[]);
+  popularSelectPacotesAgrupado(selPacote);
+  if(rascunho.pacoteId) selPacote.value = rascunho.pacoteId;
+  const selServico = el("select",null,[]);
+  function popularServicos(){
+    selServico.innerHTML = "";
+    servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
+    if(rascunho.servico && [...selServico.options].some(o=>o.value===rascunho.servico)) selServico.value = rascunho.servico;
+  }
+  popularServicos();
+  rascunho.pacoteId = selPacote.value;
+  rascunho.servico = selServico.value;
+  selPacote.addEventListener("change", () => { rascunho.pacoteId = selPacote.value; popularServicos(); rascunho.servico = selServico.value; });
+  selServico.addEventListener("change", () => { rascunho.servico = selServico.value; });
   function confirmar(){
     const codigo = normTexto(inpCodigo.value).toUpperCase();
     if(!codigo) return; // sem código ainda — deixa a linha aberta
     if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
-    if(rascunho.tipo === "avulso"){
-      if(!rascunho.formulario){ mostrarToast("Escolha o formulário avulso antes de confirmar o código."); return; }
-      cfg.mapeamentosMedicao.push({ id: uid(), codigo, tipo: "avulso", formulario: rascunho.formulario });
-    } else {
-      if(!rascunho.pacoteId || !rascunho.servico){ mostrarToast("Escolha o pacote e o serviço antes de confirmar o código."); return; }
-      cfg.mapeamentosMedicao.push({ id: uid(), codigo, tipo: "pacote", pacoteId: rascunho.pacoteId, servico: rascunho.servico });
-    }
+    if(!rascunho.pacoteId || !rascunho.servico){ mostrarToast("Escolha o pacote e o serviço antes de confirmar o código."); return; }
+    cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: rascunho.pacoteId, servico: rascunho.servico });
     salvarConfig();
     novaLinhaMapeamentoMedicao = null;
     renderizarMapeamentoMedicao();
@@ -4726,7 +4645,7 @@ function linhaNovaMapeamentoMedicao(){
   inpCodigo.addEventListener("keydown", e => { if(e.key === "Enter") confirmar(); });
   inpCodigo.addEventListener("blur", confirmar);
   return el("div",{class:"linha-servico"},[
-    el("div",{class:"info"},[inpCodigo, seletor]),
+    el("div",{class:"info"},[inpCodigo, el("div",{style:"display:flex;gap:6px;"},[selPacote, selServico])]),
     el("button",{class:"btn secundario pequeno", onclick:()=>{ novaLinhaMapeamentoMedicao = null; renderizarMapeamentoMedicao(); }},["Cancelar"])
   ]);
 }
@@ -4739,13 +4658,10 @@ function renderizarMapeamentoMedicao(){
     area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
     return;
   }
-  // agrupado por pacote, na mesma ordem vagão→pacote do Cadastro; um grupo à parte pros mapeamentos
-  // "avulsos" (vinculados a um formulário, não a um pacote), e outro pro que ficou órfão (pacote
-  // excluído depois de mapeado).
+  // agrupado por pacote, na mesma ordem vagão→pacote do Cadastro; um grupo à parte pro que ficou
+  // órfão (pacote excluído depois de mapeado).
   const porPacote = new Map();
-  const avulsos = [];
   cfg.mapeamentosMedicao.forEach(m => {
-    if(m.tipo === "avulso"){ avulsos.push(m); return; }
     if(!porPacote.has(m.pacoteId)) porPacote.set(m.pacoteId, []);
     porPacote.get(m.pacoteId).push(m);
   });
@@ -4753,15 +4669,11 @@ function renderizarMapeamentoMedicao(){
     pacotesDoVagaoEmOrdem(vagao.id).forEach(pac => {
       const itens = porPacote.get(pac.id);
       if(!itens) return;
-      area.appendChild(el("div",{class:"rotulo-categoria"},[pac.nome]));
+      area.appendChild(el("div",{class:"rotulo-categoria"},[pac.nome + (pac.semPrevision ? " (sem avanço)" : "")]));
       itens.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
       porPacote.delete(pac.id);
     });
   });
-  if(avulsos.length){
-    area.appendChild(el("div",{class:"rotulo-categoria"},["Avulsos (só comprovação de pagamento)"]));
-    avulsos.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
-  }
   if(porPacote.size){
     area.appendChild(el("div",{class:"rotulo-categoria"},["Pacote excluído"]));
     [...porPacote.values()].flat().sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
@@ -4826,38 +4738,17 @@ function abrirModalMapearCodigosMedicao(codigos, aoConcluir){
   if(codigos.length === 0){ aoConcluir(); return; }
   const [codigo, ...resto] = codigos;
   const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico();
-  let tipo = "pacote";
-  const segPacote = el("button",{class:"seg-btn ativo"},["Pacote/Serviço"]);
-  const segAvulso = el("button",{class:"seg-btn"},["Avulso (só pagamento)"]);
-  const selAvulso = el("select",{style:"display:none;"},[el("option",{value:""},["Formulário avulso…"])]);
-  cfg.formulariosAvulsos.forEach(f => selAvulso.appendChild(el("option",{value:f},[f.length>50?f.slice(0,50)+"…":f])));
-  segPacote.addEventListener("click", () => {
-    tipo = "pacote";
-    segPacote.classList.add("ativo"); segAvulso.classList.remove("ativo");
-    pacoteWrap.style.display = ""; servicoWrap.style.display = ""; selAvulso.style.display = "none";
-  });
-  segAvulso.addEventListener("click", () => {
-    tipo = "avulso";
-    segAvulso.classList.add("ativo"); segPacote.classList.remove("ativo");
-    pacoteWrap.style.display = "none"; servicoWrap.style.display = "none"; selAvulso.style.display = "";
-  });
   const overlay = el("div",{class:"modal-overlay"},[
     el("div",{class:"modal-caixa"},[
       el("h4",null,[`Novo código de medição do UAU: "${codigo}"`]),
-      el("p",null,[`Esse código ainda não está vinculado a nada do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`]),
-      el("div",{class:"segmentado",style:"margin-bottom:10px;"},[segPacote, segAvulso]),
-      pacoteWrap, servicoWrap, selAvulso,
+      el("p",null,[`Esse código ainda não está vinculado a nenhum pacote/serviço do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`]),
+      pacoteWrap, servicoWrap,
       el("div",{class:"modal-acoes"},[
         el("button",{class:"btn secundario pequeno", onclick:()=>{ fecharModal(overlay); abrirModalMapearCodigosMedicao(resto, aoConcluir); }},["Pular (ignorar este código)"]),
         el("button",{class:"btn pequeno", onclick:()=>{
-          if(tipo === "avulso"){
-            if(!selAvulso.value){ mostrarToast("Escolha o formulário avulso."); return; }
-            cfg.mapeamentosMedicao.push({ id: uid(), codigo, tipo: "avulso", formulario: selAvulso.value });
-          } else {
-            const resultado = resolverPacoteEServico();
-            if(!resultado) return;
-            cfg.mapeamentosMedicao.push({ id: uid(), codigo, tipo: "pacote", pacoteId: resultado.pacoteId, servico: resultado.servico });
-          }
+          const resultado = resolverPacoteEServico();
+          if(!resultado) return;
+          cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
           fecharModal(overlay);
           abrirModalMapearCodigosMedicao(resto, aoConcluir);
         }},["Vincular e continuar"])
@@ -4920,13 +4811,8 @@ function renderizarMedicaoUau(){
       if(!valor) return;
       totalMedido++;
       const mapa = mapaCodigo.get(codigo);
-      if(!mapa){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"código de serviço não vinculado a nenhum pacote/serviço nem formulário avulso"}); return; }
+      if(!mapa){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"código de serviço não vinculado a nenhum pacote/serviço"}); return; }
       if(!linha.lote){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"casa não reconhecida (esperado formato tipo QD16LT12)"}); return; }
-      if(mapa.tipo === "avulso"){
-        if(fvsAvulsaConfirmada(linha.lote, mapa.formulario)){ totalOk++; return; }
-        semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS avulsa "${mapa.formulario}" ainda não confirmada (ver "FVS Avulsas")`});
-        return;
-      }
       const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
       if(temFvsConcluida(linha.lote, mapa.pacoteId, mapa.servico)){ totalOk++; return; }
       semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não está Encerrada`});
@@ -5415,7 +5301,6 @@ function atualizarTodaUI(){
   renderizarPendencias();
   renderizarPrevisionTab();
   renderizarPagamentoTab();
-  renderizarFvsAvulsas();
   renderizarMapeamentoMedicao();
   renderizarMedicaoUau();
   renderizarResumo();
