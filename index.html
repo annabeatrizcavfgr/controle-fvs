@@ -4546,78 +4546,122 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
    Lista sempre visível (não só reativa a uma colagem) de cfg.mapeamentosMedicao — ela pode cadastrar
    um código a qualquer momento, mesmo antes de colar qualquer tabela, e editar o pacote/serviço de um
    já existente sem precisar excluir e recriar. */
+// linha (não-modal) de um mapeamento existente — o seletor de pacote fica visível pra poder
+// reclassificar (o item "pula" de grupo na hora, já que a lista é toda re-renderizada na troca).
+function linhaMapeamentoMedicao(m){
+  const selPacote = el("select",null,[el("option",{value:""},["(pacote excluído)"])]);
+  popularSelectPacotesAgrupado(selPacote);
+  selPacote.value = m.pacoteId;
+  const selServico = el("select",null,[]);
+  function popularServicos(){
+    selServico.innerHTML = "";
+    servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
+    if(m.servico && ![...selServico.options].some(o=>o.value===m.servico)) selServico.appendChild(el("option",{value:m.servico},[m.servico]));
+    selServico.value = m.servico || "";
+  }
+  popularServicos();
+  selPacote.addEventListener("change", () => {
+    m.pacoteId = selPacote.value;
+    popularServicos();
+    m.servico = selServico.value;
+    salvarConfig();
+    renderizarMapeamentoMedicao(); // muda de grupo
+  });
+  selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
+  return el("div",{class:"linha-servico"},[
+    el("div",{class:"info"},[
+      el("div",{class:"servico-nome"},[m.codigo]),
+      el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
+    ]),
+    el("button",{class:"btn perigo pequeno", onclick:()=>{
+      if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
+      cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
+      salvarConfig();
+      renderizarMapeamentoMedicao();
+    }},["Excluir"])
+  ]);
+}
+
+// linha nova em edição — some da tela assim que o código é confirmado (vira uma linha normal,
+// já dentro do grupo do pacote escolhido) ou some se ela clicar noutro lugar sem preencher nada.
+let novaLinhaMapeamentoMedicao = null; // {pacoteId, servico} enquanto ainda não tem código confirmado
+function linhaNovaMapeamentoMedicao(){
+  const rascunho = novaLinhaMapeamentoMedicao;
+  const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)", style:"margin-bottom:4px;"});
+  const selPacote = el("select",null,[]);
+  popularSelectPacotesAgrupado(selPacote);
+  if(rascunho.pacoteId) selPacote.value = rascunho.pacoteId;
+  const selServico = el("select",null,[]);
+  function popularServicos(){
+    selServico.innerHTML = "";
+    servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
+    if(rascunho.servico && [...selServico.options].some(o=>o.value===rascunho.servico)) selServico.value = rascunho.servico;
+  }
+  popularServicos();
+  rascunho.pacoteId = selPacote.value;
+  rascunho.servico = selServico.value;
+  selPacote.addEventListener("change", () => { rascunho.pacoteId = selPacote.value; popularServicos(); rascunho.servico = selServico.value; });
+  selServico.addEventListener("change", () => { rascunho.servico = selServico.value; });
+  function confirmar(){
+    const codigo = normTexto(inpCodigo.value).toUpperCase();
+    if(!codigo) return; // sem código ainda — deixa a linha aberta
+    if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
+    if(!rascunho.pacoteId || !rascunho.servico){ mostrarToast("Escolha o pacote e o serviço antes de confirmar o código."); return; }
+    cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: rascunho.pacoteId, servico: rascunho.servico });
+    salvarConfig();
+    novaLinhaMapeamentoMedicao = null;
+    renderizarMapeamentoMedicao();
+    mostrarToast(`"${codigo}" mapeado.`);
+  }
+  inpCodigo.addEventListener("keydown", e => { if(e.key === "Enter") confirmar(); });
+  inpCodigo.addEventListener("blur", confirmar);
+  return el("div",{class:"linha-servico"},[
+    el("div",{class:"info"},[
+      inpCodigo,
+      el("div",{style:"display:flex;gap:6px;"},[selPacote, selServico])
+    ]),
+    el("button",{class:"btn secundario pequeno", onclick:()=>{ novaLinhaMapeamentoMedicao = null; renderizarMapeamentoMedicao(); }},["Cancelar"])
+  ]);
+}
+
 function renderizarMapeamentoMedicao(){
   const area = document.getElementById("listaMapeamentoMedicao");
   if(!area) return;
   area.innerHTML = "";
-  if(cfg.mapeamentosMedicao.length === 0){
+  if(cfg.mapeamentosMedicao.length === 0 && !novaLinhaMapeamentoMedicao){
     area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
     return;
   }
-  const lista = [...cfg.mapeamentosMedicao].sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR"));
-  lista.forEach(m => {
-    const selPacote = el("select",null,[el("option",{value:""},["(pacote excluído)"])]);
-    popularSelectPacotesAgrupado(selPacote);
-    selPacote.value = m.pacoteId;
-    const selServico = el("select",null,[]);
-    function popularServicos(){
-      selServico.innerHTML = "";
-      servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
-      if(![...selServico.options].some(o=>o.value===m.servico)) selServico.appendChild(el("option",{value:m.servico},[m.servico]));
-      selServico.value = m.servico;
-    }
-    popularServicos();
-    selPacote.addEventListener("change", () => {
-      m.pacoteId = selPacote.value;
-      popularServicos();
-      m.servico = selServico.value;
-      salvarConfig();
-    });
-    selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
-    area.appendChild(el("div",{class:"linha-servico"},[
-      el("div",{class:"info"},[
-        el("div",{class:"servico-nome"},[m.codigo]),
-        el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
-      ]),
-      el("button",{class:"btn perigo pequeno", onclick:()=>{
-        if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
-        cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
-        salvarConfig();
-        renderizarMapeamentoMedicao();
-      }},["Excluir"])
-    ]));
+  // agrupado por pacote, na mesma ordem vagão→pacote do Cadastro; um grupo à parte pro que ficou
+  // órfão (pacote excluído depois de mapeado).
+  const porPacote = new Map();
+  cfg.mapeamentosMedicao.forEach(m => {
+    if(!porPacote.has(m.pacoteId)) porPacote.set(m.pacoteId, []);
+    porPacote.get(m.pacoteId).push(m);
   });
+  vagoesComPacotesEmOrdem().forEach(vagao => {
+    pacotesDoVagaoEmOrdem(vagao.id).forEach(pac => {
+      const itens = porPacote.get(pac.id);
+      if(!itens) return;
+      area.appendChild(el("div",{class:"rotulo-categoria"},[pac.nome]));
+      itens.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+      porPacote.delete(pac.id);
+    });
+  });
+  if(porPacote.size){
+    area.appendChild(el("div",{class:"rotulo-categoria"},["Pacote excluído"]));
+    [...porPacote.values()].flat().sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+  }
+  if(novaLinhaMapeamentoMedicao){
+    area.appendChild(el("div",{class:"rotulo-categoria"},["Novo"]));
+    area.appendChild(linhaNovaMapeamentoMedicao());
+  }
 }
-
-function abrirModalNovoMapeamentoMedicao(){
-  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico();
-  const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)"});
-  const overlay = el("div",{class:"modal-overlay"},[
-    el("div",{class:"modal-caixa"},[
-      el("h4",null,["Novo mapeamento de código"]),
-      inpCodigo, pacoteWrap, servicoWrap,
-      el("div",{class:"modal-acoes"},[
-        el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
-        el("button",{class:"btn pequeno", onclick:()=>{
-          const codigo = normTexto(inpCodigo.value).toUpperCase();
-          if(!codigo){ mostrarToast("Informe o código do UAU."); return; }
-          if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
-          const resultado = resolverPacoteEServico();
-          if(!resultado) return;
-          cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
-          salvarConfig();
-          fecharModal(overlay);
-          renderizarMapeamentoMedicao();
-          mostrarToast(`"${codigo}" mapeado.`);
-        }},["Salvar"])
-      ])
-    ])
-  ]);
-  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
-  document.addEventListener("keydown", overlay._onKeydown);
-  document.body.appendChild(overlay);
-}
-document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", abrirModalNovoMapeamentoMedicao);
+document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", () => {
+  if(novaLinhaMapeamentoMedicao) return; // já tem uma linha em edição
+  novaLinhaMapeamentoMedicao = {};
+  renderizarMapeamentoMedicao();
+});
 
 /* ===================== Conferência de Medição (UAU) =====================
    Ela cola aqui a tabela Casa × Serviço copiada do UAU/Excel (formato: 1ª coluna = casa tipo
