@@ -454,6 +454,17 @@
       <div class="nota" style="margin-bottom:12px;">Rotina mensal, no período de medição de empreiteiro: informe em qual mês cada serviço concluído foi pago.</div>
       <div id="areaPagamento"></div>
     </div>
+
+    <div class="painel" id="painelMedicaoUau">
+      <h3 style="margin-top:0;">📋 Conferência de Medição (UAU)</h3>
+      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
+      <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
+      <div class="toolbar" style="margin-top:8px;">
+        <button class="btn" id="btnProcessarMedicaoUau">Processar tabela colada</button>
+        <span class="sub" id="medicaoUauMeta" style="margin:0;"></span>
+      </div>
+      <div id="areaMedicaoUau"></div>
+    </div>
   </div>
 
   <!-- ABA CONSULTA (Completo + Resumo, alternados por um seletor — telas diferentes, mas ambas "buscar informação", não editar nada) -->
@@ -714,7 +725,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -982,6 +993,7 @@ async function enterObra(){
   if(!ok) return;
   await initDb();
   await carregarConfig();
+  await carregarMedicaoUau();
   atualizarTodaUI();
   await restaurarArquivosCache();
 }
@@ -992,6 +1004,7 @@ async function afterLogin(){
   if(!ok) return;
   await initDb();
   await carregarConfig();
+  await carregarMedicaoUau();
   atualizarTodaUI();
   await restaurarArquivosCache();
 }
@@ -1195,7 +1208,8 @@ let cfg = {
   knownFormularios: [],   // string[]
   knownSublocais: [...SUBLOCAIS_SEED],
   versoes: [],             // {id, data (ISO), rotulo, chaves:[...]} — snapshots arquivados, do mais antigo pro mais recente
-  statusServico: {}        // { [chaveRegra]: {previsionLancado, previsionData, mesPagamento} } — ver chaveRegra()
+  statusServico: {},        // { [chaveRegra]: {previsionLancado, previsionData, mesPagamento} } — ver chaveRegra()
+  mapeamentosMedicao: []    // {id, codigo (ex.: "S00296"), pacoteId, servico} — ver Conferência de Medição (UAU)
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -1236,6 +1250,7 @@ async function carregarConfig(){
       cfg.knownSublocais = [...setSub];
       cfg.versoes = parsed.versoes || [];
       cfg.statusServico = parsed.statusServico || {};
+      cfg.mapeamentosMedicao = parsed.mapeamentosMedicao || [];
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
       const nomesCorrigidos = corrigirPacotesOrfaos();
@@ -4518,6 +4533,153 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
   );
 });
 
+/* ===================== Conferência de Medição (UAU) =====================
+   Ela cola aqui a tabela Casa × Serviço copiada do UAU/Excel (formato: 1ª coluna = casa tipo
+   "QD16LT12", demais colunas = códigos de serviço tipo "S00296", células = valor medido). O app:
+   1) reconhece os códigos de serviço já mapeados (cfg.mapeamentosMedicao) pro pacote/serviço do FVS;
+   2) pra código novo, pede um mapeamento rápido (reaproveita criarSeletorPacoteServico, o mesmo
+      seletor usado em Pendências) — fica salvo pra próxima colagem não perguntar de novo;
+   3) cruza cada casa/serviço medido com o que o FVS já marcou como concluído (regrasConcluidas) —
+      usando só os números de quadra+lote extraídos da casa, já que o formato de "casa" no MOBUSS
+      não necessariamente é escrito igual ao do UAU (ex.: "16-12" vs "QD16LT12").
+   A última tabela colada fica salva (obras/<obraId>/medicaoUau), compartilhada com o time — não
+   precisa recolar toda vez que alguém abrir a página. */
+function extrairQuadraLote(casaTexto){
+  const nums = String(casaTexto||"").match(/\d+/g);
+  if(!nums || nums.length < 2) return null;
+  return nums[0].replace(/^0+/,"") + "|" + nums[1].replace(/^0+/,"");
+}
+function parseTabelaColada(texto){
+  const linhas = texto.split(/\r?\n/).map(l=>l.split("\t")).filter(cols => cols.some(c=>c.trim()!==""));
+  if(linhas.length < 2) return null;
+  // acha a linha de cabeçalho: a primeira linha cuja 1ª célula não é numérica e a linha seguinte
+  // já parece ser uma casa (tem quadra+lote reconhecíveis) — se não achar esse padrão, assume que
+  // a colagem já começa direto no cabeçalho (linha 0).
+  let idxHeader = 0;
+  for(let i=0;i<linhas.length-1;i++){
+    if(extrairQuadraLote(linhas[i+1][0])){ idxHeader = i; break; }
+  }
+  const header = linhas[idxHeader];
+  const codigos = header.slice(1).map(c=>c.trim()).filter(Boolean);
+  const dados = linhas.slice(idxHeader+1)
+    .map(cols => ({ casa: cols[0].trim(), quadraLote: extrairQuadraLote(cols[0]), valores: cols.slice(1) }))
+    .filter(r => r.casa);
+  if(codigos.length === 0 || dados.length === 0) return null;
+  return { codigos, linhas: dados };
+}
+
+function codigosNaoMapeados(codigos){
+  const mapeados = new Set(cfg.mapeamentosMedicao.map(m=>m.codigo));
+  return codigos.filter(c => !mapeados.has(c));
+}
+
+function abrirModalMapearCodigosMedicao(codigos, aoConcluir){
+  if(codigos.length === 0){ aoConcluir(); return; }
+  const [codigo, ...resto] = codigos;
+  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico();
+  const overlay = el("div",{class:"modal-overlay"},[
+    el("div",{class:"modal-caixa"},[
+      el("h4",null,[`Novo código de serviço do UAU: "${codigo}"`]),
+      el("p",null,[`Esse código ainda não está vinculado a nenhum pacote/serviço do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`]),
+      pacoteWrap, servicoWrap,
+      el("div",{class:"modal-acoes"},[
+        el("button",{class:"btn secundario pequeno", onclick:()=>{ fecharModal(overlay); abrirModalMapearCodigosMedicao(resto, aoConcluir); }},["Pular (ignorar este código)"]),
+        el("button",{class:"btn pequeno", onclick:()=>{
+          const resultado = resolverPacoteEServico();
+          if(!resultado) return;
+          cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
+          fecharModal(overlay);
+          abrirModalMapearCodigosMedicao(resto, aoConcluir);
+        }},["Vincular e continuar"])
+      ])
+    ])
+  ]);
+  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
+
+async function processarColagemMedicaoUau(){
+  const texto = document.getElementById("colaMedicaoUau").value;
+  if(!texto.trim()){ mostrarToast("Cole a tabela copiada do UAU/Excel antes de processar."); return; }
+  const tabela = parseTabelaColada(texto);
+  if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
+  const faltando = codigosNaoMapeados(tabela.codigos);
+  abrirModalMapearCodigosMedicao(faltando, async () => {
+    await salvarConfig();
+    ultimaMedicaoUau = { codigos: tabela.codigos, linhas: tabela.linhas, atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null };
+    try{ await db.doc("medicaoUau").set(ultimaMedicaoUau); }
+    catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
+    document.getElementById("colaMedicaoUau").value = "";
+    renderizarMedicaoUau();
+    mostrarToast("Tabela processada e conferida.");
+  });
+}
+
+let ultimaMedicaoUau = null; // { codigos, linhas, atualizadoEm, atualizadoPor } — ver carregarMedicaoUau/processarColagemMedicaoUau
+async function carregarMedicaoUau(){
+  try{
+    const snap = await db.doc("medicaoUau").get();
+    ultimaMedicaoUau = snap.exists ? snap.data() : null;
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); }
+}
+
+// Pra uma casa (quadra+lote) e um pacoteId+servico, existe algum registro de FVS concluído que bate?
+// Casa aqui é comparada só pelos números de quadra/lote (ver extrairQuadraLote) — o texto exato de
+// "casa" pode ser escrito diferente entre MOBUSS e UAU.
+function temFvsConcluida(quadraLote, pacoteId, servico){
+  return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairQuadraLote(r.casa) === quadraLote);
+}
+
+function renderizarMedicaoUau(){
+  const area = document.getElementById("areaMedicaoUau");
+  const meta = document.getElementById("medicaoUauMeta");
+  if(!area || !meta) return;
+  if(!ultimaMedicaoUau){ area.innerHTML = ""; meta.textContent = ""; return; }
+  meta.textContent = `Última conferência: ${formatarData(new Date(ultimaMedicaoUau.atualizadoEm))}${ultimaMedicaoUau.atualizadoPor?" · "+ultimaMedicaoUau.atualizadoPor:""}`;
+
+  const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
+  const semFvs = [];
+  let totalMedido = 0, totalOk = 0;
+  ultimaMedicaoUau.linhas.forEach(linha => {
+    ultimaMedicaoUau.codigos.forEach((codigo, i) => {
+      const bruto = (linha.valores[i]||"").trim();
+      if(!bruto || bruto === "-") return;
+      const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
+      if(!valor) return;
+      totalMedido++;
+      const mapa = mapaCodigo.get(codigo);
+      if(!mapa){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"código de serviço não vinculado a nenhum pacote/serviço"}); return; }
+      if(!linha.quadraLote){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"casa não reconhecida (esperado formato tipo QD16LT12)"}); return; }
+      const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
+      if(temFvsConcluida(linha.quadraLote, mapa.pacoteId, mapa.servico)){ totalOk++; return; }
+      semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não está Encerrada`});
+    });
+  });
+
+  area.innerHTML = "";
+  area.appendChild(el("div",{class:"cards-resumo"},[
+    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(totalMedido)]), el("div",{class:"rotulo"},["Itens medidos"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(semFvs.length)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
+  ]));
+  if(semFvs.length){
+    area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:12px;"},[
+      el("table",{class:"tbl"},[
+        el("thead",null,[el("tr",null,[el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Valor medido"]),el("th",null,["Situação"])])]),
+        el("tbody",null, semFvs.map(item => el("tr",null,[
+          el("td",null,[item.casa]), el("td",null,[item.codigo]),
+          el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
+          el("td",null,[el("span",{class:"badge pendente"},[item.motivo])])
+        ])))
+      ])
+    ]));
+  } else if(totalMedido > 0) {
+    area.appendChild(el("div",{class:"msg-vazio"},["✅ Todo item medido já tem FVS Encerrada correspondente."]));
+  }
+}
+document.getElementById("btnProcessarMedicaoUau").addEventListener("click", processarColagemMedicaoUau);
+
 /* ===================== ABA RESUMO (relatório semanal, navegável por versão arquivada) ===================== */
 // "Semana" aqui = uma versão arquivada (cada arquivamento representa o lote de uma semana, ver
 // [[Avanços automáticos]]). Selecionar uma versão passada reconstrói exatamente o que era "novo"
@@ -4977,6 +5139,7 @@ function atualizarTodaUI(){
   renderizarPendencias();
   renderizarPrevisionTab();
   renderizarPagamentoTab();
+  renderizarMedicaoUau();
   renderizarResumo();
   renderizarCompleto();
 }
@@ -4991,6 +5154,7 @@ document.getElementById("btnSair").addEventListener("click", async ()=>{ if(AUTH
   if(!podeSeguir) return; // ficou na tela de login, aguardando aprovação, ou trocando de senha
   if(!db) await initDb();
   await carregarConfig();
+  await carregarMedicaoUau();
   atualizarTodaUI();
   await restaurarArquivosCache();
 })();
