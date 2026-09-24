@@ -8,7 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
   :root{
-    --azul:#1c4e80; --azul-esc:#123a5e; --azul-claro:#e7f0fa;
+    --vinho:#7a1f2b; --vinho-esc:#4d1119; --vinho-claro:#f7e9ea;
     --verde:#1c8a4c; --verde-claro:#e5f6ec;
     --amarelo:#b8860b; --amarelo-claro:#fdf3d9;
     --vermelho:#b3261e; --vermelho-claro:#fbe9e8;
@@ -18,7 +18,7 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;background:var(--cinza-100);color:var(--cinza-900);font-family:"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;}
-  header.topo{background:linear-gradient(135deg,var(--azul-esc),var(--azul));color:#fff;padding:14px 24px;box-shadow:var(--sombra);}
+  header.topo{background:linear-gradient(135deg,var(--vinho-esc),var(--vinho));color:#fff;padding:14px 24px;box-shadow:var(--sombra);}
   header.topo h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.2px;}
   header.topo p{margin:3px 0 0;font-size:12px;opacity:.85;}
 
@@ -30,8 +30,8 @@
   .painel .sub{color:var(--cinza-700);font-size:12.5px;margin-bottom:12px;}
 
   .dropzone{border:2px dashed var(--cinza-300);border-radius:var(--radius);padding:22px;text-align:center;cursor:pointer;transition:.15s;background:var(--cinza-100);}
-  .dropzone:hover, .dropzone.arrastando{border-color:var(--azul);background:var(--azul-claro);}
-  .dropzone strong{color:var(--azul);}
+  .dropzone:hover, .dropzone.arrastando{border-color:var(--vinho);background:var(--vinho-claro);}
+  .dropzone strong{color:var(--vinho);}
   .dropzone input{display:none;}
 
   .lista-arquivos{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
@@ -41,7 +41,7 @@
   .arquivo-item button{background:none;border:none;color:var(--vermelho);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;}
 
   .resumo-carga{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
-  .chip-stat{background:var(--azul-claro);color:var(--azul-esc);border-radius:20px;padding:6px 14px;font-size:12.5px;font-weight:600;}
+  .chip-stat{background:var(--vinho-claro);color:var(--vinho-esc);border-radius:20px;padding:6px 14px;font-size:12.5px;font-weight:600;}
   .chip-stat.alerta{background:var(--amarelo-claro);color:var(--amarelo);}
   .chip-stat.erro{background:var(--vermelho-claro);color:var(--vermelho);}
   .chip-stat.ok{background:var(--verde-claro);color:var(--verde);}
@@ -61,13 +61,13 @@
     white-space:nowrap;
   }
   nav.abas button:hover{background:var(--cinza-100);color:var(--cinza-900);}
-  nav.abas button.ativa{background:var(--azul-claro);color:var(--azul-esc);}
+  nav.abas button.ativa{background:var(--vinho-claro);color:var(--vinho-esc);}
   nav.abas .icone-aba{display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--cinza-500);}
   nav.abas .icone-aba svg{width:18px;height:18px;display:block;}
-  nav.abas button.ativa .icone-aba{color:var(--azul);}
+  nav.abas button.ativa .icone-aba{color:var(--vinho);}
   nav.abas .rotulo-aba{flex:1;overflow:hidden;text-overflow:ellipsis;}
   nav.abas button .contagem{background:var(--cinza-200);color:var(--cinza-700);border-radius:10px;padding:1px 7px;font-size:11px;flex-shrink:0;}
-  nav.abas button.ativa .contagem{background:#fff;color:var(--azul);}
+  nav.abas button.ativa .contagem{background:#fff;color:var(--vinho);}
   nav.abas button.pend .contagem{background:var(--amarelo-claro);color:var(--amarelo);}
   @media (max-width: 820px){
     nav.abas{width:60px;padding:12px 6px;}
@@ -83,10 +83,10 @@
   .toolbar input[type=text]{min-width:220px;flex:1;}
   .espaco{flex:1;}
 
-  button.btn{background:var(--azul);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
-  button.btn:hover{background:var(--azul-esc);}
-  button.btn.secundario{background:#fff;color:var(--azul);border:1px solid var(--azul);}
-  button.btn.secundario:hover{background:var(--azul-claro);}
+  button.btn{background:var(--vinho);color:#fff;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;}
+  button.btn:hover{background:var(--vinho-esc);}
+  button.btn.secundario{background:#fff;color:var(--vinho);border:1px solid var(--vinho);}
+  button.btn.secundario:hover{background:var(--vinho-claro);}
   button.btn.perigo{background:#fff;color:var(--vermelho);border:1px solid var(--vermelho);}
   button.btn.perigo:hover{background:var(--vermelho-claro);}
   button.btn.pequeno{padding:5px 10px;font-size:12px;}
@@ -95,7 +95,7 @@
   .seg-btn{background:#fff;color:var(--cinza-700);border:none;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-right:1px solid var(--cinza-300);}
   .seg-btn:last-child{border-right:none;}
   .seg-btn:hover{background:var(--cinza-100);}
-  .seg-btn.ativo{background:var(--azul);color:#fff;}
+  .seg-btn.ativo{background:var(--vinho);color:#fff;}
   button.btn:disabled{opacity:.5;cursor:not-allowed;}
 
   table.tbl{width:100%;border-collapse:collapse;font-size:13px;background:#fff;}
@@ -112,7 +112,7 @@
   .badge.parcial{background:var(--amarelo-claro);color:var(--amarelo);}
   .badge.pendente{background:var(--vermelho-claro);color:var(--vermelho);}
   .badge.info{background:var(--cinza-200);color:var(--cinza-700);}
-  .badge.azul{background:var(--azul-claro);color:var(--azul-esc);}
+  .badge.azul{background:var(--vinho-claro);color:var(--vinho-esc);}
 
   .linha-detalhe{background:var(--cinza-100) !important;}
   .linha-detalhe td{padding:10px 14px;}
@@ -153,7 +153,7 @@
   .seletor-vagao{border:1px solid var(--cinza-300);border-radius:5px;padding:4px 6px;font-size:11.5px;background:#fff;max-width:140px;}
   .botoes-ordem{display:flex;flex-direction:column;gap:1px;flex-shrink:0;}
   .btn-seta{width:18px;height:13px;padding:0;border:1px solid var(--cinza-300);background:#fff;color:var(--cinza-700);font-size:8px;line-height:1;cursor:pointer;border-radius:3px;display:flex;align-items:center;justify-content:center;}
-  .btn-seta:hover{border-color:var(--azul);color:var(--azul);background:var(--azul-claro);}
+  .btn-seta:hover{border-color:var(--vinho);color:var(--vinho);background:var(--vinho-claro);}
   .btn-seta:disabled{opacity:.35;cursor:not-allowed;}
   .btn-seta:disabled:hover{border-color:var(--cinza-300);color:var(--cinza-700);background:#fff;}
   .lista-reordenar{max-height:360px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:14px;}
@@ -178,7 +178,7 @@
   .chips-editor{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
   .chip{background:var(--cinza-100);border:1px solid var(--cinza-300);border-radius:14px;padding:3px 8px 3px 10px;font-size:11.5px;display:flex;align-items:center;gap:5px;white-space:nowrap;flex-shrink:0;}
   .chip button{background:none;border:none;cursor:pointer;color:var(--cinza-500);font-size:13px;padding:0;line-height:1;}
-  .chip-add{border:1px dashed var(--cinza-300);border-radius:14px;padding:3px 10px;font-size:11.5px;background:none;cursor:pointer;color:var(--azul);}
+  .chip-add{border:1px dashed var(--cinza-300);border-radius:14px;padding:3px 10px;font-size:11.5px;background:none;cursor:pointer;color:var(--vinho);}
   .pacote-card{border:1px solid var(--cinza-200);border-radius:8px;padding:12px 14px;margin-bottom:8px;background:#fff;}
   .pacote-card .cabecalho{display:flex;justify-content:space-between;align-items:center;gap:10px;}
   .pacote-card .titulo{font-weight:700;font-size:13.5px;}
@@ -189,9 +189,9 @@
   .sugestoes-rapidas{margin-top:10px;}
   .sugestoes-rapidas .lista{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;max-height:130px;overflow:auto;padding:8px;background:var(--cinza-100);border-radius:6px;}
   .sugestoes-rapidas .lista button{background:#fff;border:1px solid var(--cinza-300);border-radius:14px;padding:4px 10px;font-size:11.5px;cursor:pointer;}
-  .sugestoes-rapidas .lista button:hover{border-color:var(--azul);color:var(--azul);}
+  .sugestoes-rapidas .lista button:hover{border-color:var(--vinho);color:var(--vinho);}
 
-  .nota{background:var(--azul-claro);border:1px solid #c9dcf0;border-radius:6px;padding:10px 12px;font-size:12.5px;color:var(--azul-esc);margin-bottom:14px;}
+  .nota{background:var(--vinho-claro);border:1px solid #e3c3c7;border-radius:6px;padding:10px 12px;font-size:12.5px;color:var(--vinho-esc);margin-bottom:14px;}
   .nota.amarela{background:var(--amarelo-claro);border-color:#f0dca3;color:#7a5c00;}
 
   .grupo-pendencia{border:1px solid var(--cinza-200);border-radius:8px;margin-bottom:10px;overflow:hidden;background:#fff;}
@@ -205,7 +205,7 @@
 
   .cards-resumo{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px;}
   .card-num{background:#fff;border:1px solid var(--cinza-200);border-radius:8px;padding:14px;text-align:center;}
-  .card-num .valor{font-size:24px;font-weight:800;color:var(--azul);}
+  .card-num .valor{font-size:24px;font-weight:800;color:var(--vinho);}
   .card-num .rotulo{font-size:11.5px;color:var(--cinza-700);margin-top:2px;}
 
   .barra-pacote{border:1px solid var(--cinza-200);border-radius:8px;padding:12px 14px;margin-bottom:8px;background:#fff;}
@@ -213,26 +213,26 @@
   .barra-pacote .nome-pacote{font-weight:700;font-size:13.5px;}
   .barra-pacote .fracao{font-size:12px;color:var(--cinza-700);}
   .barra-fundo{background:var(--cinza-200);border-radius:6px;height:10px;overflow:hidden;}
-  .barra-preench{background:linear-gradient(90deg,var(--azul),var(--verde));height:100%;border-radius:6px;}
+  .barra-preench{background:linear-gradient(90deg,var(--vinho),var(--verde));height:100%;border-radius:6px;}
 
   .barra-pacote.clicavel{cursor:pointer;transition:.12s;}
-  .barra-pacote.clicavel:hover{border-color:var(--azul);box-shadow:var(--sombra);}
+  .barra-pacote.clicavel:hover{border-color:var(--vinho);box-shadow:var(--sombra);}
 
   .breadcrumb{display:flex;align-items:center;gap:4px;font-size:13px;margin-bottom:14px;flex-wrap:wrap;}
   .breadcrumb .crumb{color:var(--cinza-700);}
   .breadcrumb button.crumb{background:none;border:none;color:var(--cinza-700);cursor:pointer;font-size:13px;font-weight:600;padding:4px 9px;border-radius:20px;}
-  .breadcrumb button.crumb:hover{background:var(--azul-claro);color:var(--azul-esc);}
+  .breadcrumb button.crumb:hover{background:var(--vinho-claro);color:var(--vinho-esc);}
   .breadcrumb .crumb.atual{color:var(--cinza-900);font-weight:700;padding:4px 9px;}
   .breadcrumb .separador{color:var(--cinza-300);font-size:11px;}
 
   .rotulo-categoria{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--cinza-700);margin:16px 0 8px;}
-  .rotulo-categoria::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--cor-destaque,var(--azul));flex-shrink:0;}
+  .rotulo-categoria::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--cor-destaque,var(--vinho));flex-shrink:0;}
 
   .grade-pastas{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;}
   .card-pasta{background:#fff;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;cursor:pointer;transition:.14s;text-align:left;position:relative;overflow:hidden;}
-  .card-pasta::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--cor-destaque,var(--azul));}
+  .card-pasta::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--cor-destaque,var(--vinho));}
   .card-pasta:hover{border-color:var(--cinza-300);box-shadow:var(--sombra);transform:translateY(-2px);}
-  .card-pasta .avatar-pasta{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;background:var(--cor-destaque,var(--azul));margin-bottom:10px;}
+  .card-pasta .avatar-pasta{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;background:var(--cor-destaque,var(--vinho));margin-bottom:10px;}
   .card-pasta .nome-pasta{font-weight:700;font-size:13.5px;color:var(--cinza-900);margin-bottom:6px;word-break:break-word;}
   .card-pasta .meta-pasta{font-size:11.5px;color:var(--cinza-700);}
   .card-pasta .barra-fundo{margin-top:10px;height:6px;}
@@ -240,12 +240,12 @@
   code.mono{font-family:Consolas,monospace;background:var(--cinza-100);padding:1px 5px;border-radius:4px;font-size:11.5px;}
   .loading-overlay{position:fixed;inset:0;background:rgba(20,30,50,.35);display:none;align-items:center;justify-content:center;z-index:999;}
   .loading-overlay.ativo{display:flex;}
-  .loading-box{background:#fff;border-radius:10px;padding:22px 30px;font-weight:600;color:var(--azul-esc);box-shadow:var(--sombra);}
+  .loading-box{background:#fff;border-radius:10px;padding:22px 30px;font-weight:600;color:var(--vinho-esc);box-shadow:var(--sombra);}
 
   .modal-overlay{position:fixed;inset:0;background:rgba(20,30,50,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
   /* Overlay de login/obra/usuários: fundo sólido (não deixa ver o app por trás, diferente dos
      modais internos do app, que continuam com fundo semitransparente de propósito). */
-  #authModalOverlay{background:linear-gradient(135deg,var(--azul-esc),var(--azul));}
+  #authModalOverlay{background:linear-gradient(135deg,var(--vinho-esc),var(--vinho));}
   .modal-caixa{background:#fff;border-radius:10px;padding:20px 22px;box-shadow:var(--sombra);max-width:420px;width:100%;}
   .modal-caixa.larga{max-width:540px;}
   .modal-caixa h4{margin:0 0 10px;font-size:14.5px;color:var(--cinza-900);}
@@ -274,8 +274,8 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span id="whoamiSlot" style="font-size:12px;opacity:.9;white-space:nowrap;"></span>
-      <button class="btn secundario pequeno" id="btnUsuarios" title="Gerenciar quem pode entrar e editar" style="display:none;">👤 Usuários</button>
-      <button class="btn secundario pequeno" id="btnTrocarObra" title="Trocar para outra obra, ou cadastrar uma obra nova" style="display:none;">🏗️ Trocar de obra</button>
+      <button class="btn secundario pequeno" id="btnUsuarios" title="Gerenciar quem pode entrar e editar" style="display:none;">Usuários</button>
+      <button class="btn secundario pequeno" id="btnTrocarObra" title="Trocar para outra obra, ou cadastrar uma obra nova" style="display:none;">Trocar de obra</button>
       <button class="btn secundario pequeno" id="btnSair" style="display:none;">Sair</button>
     </div>
   </div>
@@ -331,7 +331,7 @@
       <div class="cad-secao" style="margin-bottom:0;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
           <h3 style="margin:0;">Estrutura: Vagão → Pacote → Serviço</h3>
-          <button class="btn" id="btnSalvarCadastro">💾 Salvar alterações</button>
+          <button class="btn" id="btnSalvarCadastro">Salvar alterações</button>
         </div>
         <div class="sub" style="margin:4px 0 12px;">
           Um <b>vagão</b> agrupa vários pacotes (ex.: ACABAMENTOS). Um <b>pacote</b> agrupa vários serviços (ex.: Contrapiso). Cada <b>serviço</b> corresponde a 1 Formulário FVS e, opcionalmente, a um sublocal específico. Um pacote só fica completo numa Quadra-Casa-Sublocal quando todos os seus serviços (daquele sublocal) estiverem com a FVS Encerrada.
@@ -366,17 +366,17 @@
       <div id="areaComparativoUpload"></div>
     </div>
     <div class="painel">
-      <h3 style="margin-top:0;">✅ Checklist da semana</h3>
+      <h3 style="margin-top:0;">Checklist da semana</h3>
       <div id="areaChecklist"></div>
     </div>
     <div class="painel">
       <div class="cad-secao" style="margin-bottom:10px;">
         <div class="cad-secao-cab" id="cabSecaoVersoes">
           <span class="seta-secao" id="seta-secaoVersoes">▸</span>
-          <h3 style="font-size:13px;">📦 Versões salvas <span id="ctVersoes" class="sub" style="font-weight:400;"></span></h3>
+          <h3 style="font-size:13px;"Versões salvas <span id="ctVersoes" class="sub" style="font-weight:400;"></span></h3>
         </div>
         <div id="secaoVersoes" style="display:none;">
-          <div class="sub" style="margin:4px 0 10px;">Cada vez que você importa uma exportação nova do MOBUSS, o filtro "🆕 Só novos desta semana" abaixo mostra só os serviços novos desde o último "Salvar avanço". Quando terminar de revisar e lançar a semana no Prevision, clique em "💾 Salvar avanço" abaixo — isso vira o novo ponto de partida.</div>
+          <div class="sub" style="margin:4px 0 10px;">Cada vez que você importa uma exportação nova do MOBUSS, o filtro "Só novos desta semana" abaixo mostra só os serviços novos desde o último "Salvar avanço". Quando terminar de revisar e lançar a semana no Prevision, clique em "Salvar avanço" abaixo — isso vira o novo ponto de partida.</div>
           <div id="listaVersoes"></div>
         </div>
       </div>
@@ -390,8 +390,8 @@
         <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;">
           <input type="checkbox" id="chkMostrarLinhaPendencias"> Mostrar linha/identificador da planilha
         </label>
-        <button class="btn secundario" id="btnAtualizarPendencias" title="Recalcular pendências agora (ex.: depois de ajustar o Cadastro)">🔄 Atualizar análise</button>
-        <button class="btn secundario" id="btnExportPendencias">⬇ Exportar CSV</button>
+        <button class="btn secundario" id="btnAtualizarPendencias" title="Recalcular pendências agora (ex.: depois de ajustar o Cadastro)">Atualizar análise</button>
+        <button class="btn secundario" id="btnExportPendencias">Exportar CSV</button>
       </div>
       <div id="areaPendencias"></div>
     </div>
@@ -404,8 +404,8 @@
         </div>
         <div class="espaco"></div>
         <button class="btn secundario" id="btnAvancoManual">+ Avanço manual</button>
-        <button class="btn secundario" id="btnExportPrevision">⬇ Exportar CSV</button>
-        <button class="btn" id="btnArquivarVersao">💾 Salvar avanço</button>
+        <button class="btn secundario" id="btnExportPrevision">Exportar CSV</button>
+        <button class="btn" id="btnArquivarVersao">Salvar avanço</button>
       </div>
       <div class="toolbar" id="toolbarPrevisionPacote">
         <input type="text" id="buscaPrevision" placeholder="Buscar casa, quadra, serviço ou empresa…">
@@ -439,7 +439,7 @@
           <button class="seg-btn" data-modo="casa">Por casa</button>
         </div>
         <div class="espaco"></div>
-        <button class="btn secundario" id="btnExportPagamento">⬇ Exportar CSV</button>
+        <button class="btn secundario" id="btnExportPagamento">Exportar CSV</button>
       </div>
       <div class="toolbar" id="toolbarPagamentoPacote">
         <input type="text" id="buscaPagamento" placeholder="Buscar casa, quadra, serviço ou empresa…">
@@ -457,7 +457,7 @@
 
     <div class="painel" id="painelMapeamentoMedicao">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
-        <h3 style="margin:0;">⚙️ Códigos de medição (UAU) → Pacote/Serviço do FVS</h3>
+        <h3 style="margin:0;">Códigos de medição (UAU) → Pacote/Serviço do FVS</h3>
         <button class="btn secundario pequeno" id="btnNovoMapeamentoMedicao">+ Novo mapeamento</button>
       </div>
       <div class="sub" style="margin:4px 0 12px;">Cadastre aqui a quais pacote/serviço do FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular.</div>
@@ -465,13 +465,13 @@
     </div>
 
     <div class="painel" id="painelFvsAvulsas">
-      <h3 style="margin-top:0;">📁 FVS Avulsas</h3>
+      <h3 style="margin-top:0;">FVS Avulsas</h3>
       <div class="sub" style="margin-top:-6px;margin-bottom:10px;">FVS do MOBUSS marcadas como "avulsas" na aba Avanço Físico (não fecham nenhum pacote) — confirme aqui, ocorrência por ocorrência, na hora da medição. Confirmar aqui não conta como avanço físico nem entra no Prevision.</div>
       <div id="areaFvsAvulsas"></div>
     </div>
 
     <div class="painel" id="painelMedicaoUau">
-      <h3 style="margin-top:0;">📋 Conferência de Medição (UAU)</h3>
+      <h3 style="margin-top:0;">Conferência de Medição (UAU)</h3>
       <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
       <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
       <div class="toolbar" style="margin-top:8px;">
@@ -498,7 +498,7 @@
           <button class="seg-btn" data-modo="casa">Por casa</button>
         </div>
         <div class="espaco"></div>
-        <button class="btn secundario" id="btnExportCompleto">⬇ Exportar CSV</button>
+        <button class="btn secundario" id="btnExportCompleto">Exportar CSV</button>
       </div>
       <div id="breadcrumbCompleto" class="breadcrumb"></div>
       <div class="toolbar" id="toolbarCompleto">
@@ -2800,13 +2800,13 @@ function atualizarBotaoSalvarCadastro(){
   const btn = document.getElementById("btnSalvarCadastro");
   if(!btn) return;
   btn.classList.toggle("destaque", cadastroSujo);
-  btn.textContent = cadastroSujo ? "💾 Salvar alterações •" : "💾 Salvar alterações";
+  btn.textContent = cadastroSujo ? "Salvar alterações •" : "Salvar alterações";
 }
 
 // true quando há avanço da semana (pacote completo novo, ou serviço concluído novo) que ainda não
 // entrou em nenhuma versão arquivada — mesmo criterio que salvarAvancoAtual() usa pra decidir se há
 // algo novo pra salvar. Isso não é sobre os dados terem sido gravados (planilha e marcações de
-// Prevision/pagamento já salvam na hora) — é sobre ela ainda não ter clicado "💾 Salvar avanço" pra
+// Prevision/pagamento já salvam na hora) — é sobre ela ainda não ter clicado "Salvar avanço" pra
 // arquivar a semana, o que os deixaria de fora do histórico de versões se ela esquecer.
 function haAvancoNaoArquivado(){
   if(avancos.length === 0 && regrasConcluidas.length === 0) return false;
@@ -2839,7 +2839,6 @@ function renderizarArvoreCadastro(){
 
   if(cfg.vagoes.length === 0){
     container.appendChild(el("div",{class:"msg-vazio"},[
-      el("div",{class:"grande"},["🗂️"]),
       el("div",null,["Nenhum vagão cadastrado ainda. Importe uma planilha de controle acima, ou crie o primeiro em \"+ Novo vagão\"."])
     ]));
     return;
@@ -3163,7 +3162,7 @@ function linhaAddServico(pac){
     const s2=new Set(cfg.knownFormularios); s2.add(formulario); cfg.knownFormularios=[...s2];
     marcarCadastroSujo(); renderizarArvoreCadastro();
   }},["+ Adicionar serviço"]);
-  return el("div",{class:"form-linha", style:"grid-template-columns:1.3fr 1.6fr 1fr auto;background:var(--azul-claro);border-color:#c9dcf0;margin-top:4px;"},[
+  return el("div",{class:"form-linha", style:"grid-template-columns:1.3fr 1.6fr 1fr auto;background:var(--vinho-claro);border-color:#c9dcf0;margin-top:4px;"},[
     inpServico, inpFormulario, inpSublocal, btn
   ]);
 }
@@ -3484,7 +3483,7 @@ function abrirModalAvancoManual(){
             if(chk.checked) casasSelecionadas.add(c); else casasSelecionadas.delete(c);
             atualizarContador(); renderizarListaCasas();
           });
-          linhaCasas.appendChild(el("label",{class:"chip", style:"cursor:pointer;"+(marcada?"background:var(--azul-claro);border-color:var(--azul);":"")},[chk, c]));
+          linhaCasas.appendChild(el("label",{class:"chip", style:"cursor:pointer;"+(marcada?"background:var(--vinho-claro);border-color:var(--vinho);":"")},[chk, c]));
         });
         listaWrap.appendChild(linhaCasas);
       });
@@ -3768,7 +3767,7 @@ function formularioResolucaoForm(formulario, regs){
     salvarConfig();
     mostrarToast(`"${formulario.length>50?formulario.slice(0,50)+"…":formulario}" marcado como avulso.`);
     recalcularTudo();
-  }},["📁 Avulso (só pagamento)"]);
+  }},["Avulso (só pagamento)"]);
   const linha = criarLinhaResolucao(formulario, undefined, "Resolver todos", [btnToggle, btnAvulso], undefined, regs.map(r=>r.casa), regs);
   return el("div",null,[linha, blocoVariacoes(formulario, regs)]);
 }
@@ -3877,11 +3876,11 @@ function renderizarPendenciasConteudo(){
   document.getElementById("ctPendenciasSemana").textContent = qtdTotal;
 
   if(!dados.processado){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Importe uma planilha MOBUSS para começar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Importe uma planilha MOBUSS para começar."])]));
     return;
   }
   if(qtdTotal === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,["Nenhuma pendência! Todos os formulários encontrados têm pacote configurado e hierarquia reconhecida."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Nenhuma pendência! Todos os formulários encontrados têm pacote configurado e hierarquia reconhecida."])]));
     return;
   }
 
@@ -4019,7 +4018,7 @@ function tabelaOcorrenciasPendencia(formulario, regs){
   if(chavesSelecionadas.size > 0){
     const regsSelecionados = ordenadas.filter(r => chavesSelecionadas.has(chaveOcorrenciaPendencia(r)));
     const casasSelecionadas = [...new Set(regsSelecionados.map(r=>r.casa))];
-    container.appendChild(el("div",{style:"display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;background:var(--azul-claro);border-radius:6px;flex-wrap:wrap;"},[
+    container.appendChild(el("div",{style:"display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;background:var(--vinho-claro);border-radius:6px;flex-wrap:wrap;"},[
       el("span",{style:"font-size:12.5px;font-weight:600;flex:1;"},[`${chavesSelecionadas.size} ocorrência(s) selecionada(s) (${casasSelecionadas.length} casa(s))`]),
       el("button",{class:"btn pequeno", onclick:()=>abrirModalResolverCasasSelecionadas(formulario, casasSelecionadas)},["Resolver casas juntas"]),
       el("button",{class:"btn secundario pequeno", onclick:()=>{ chavesSelecionadas.clear(); renderizarPendencias(); }},["Limpar seleção"])
@@ -4074,7 +4073,7 @@ function tabelaOcorrenciasPendencia(formulario, regs){
   });
   tbl.appendChild(tbody);
   wrap.appendChild(tbl);
-  if(ordenadas.length>LIMITE) wrap.appendChild(el("div",{class:"sub",style:"padding:6px;"},[`Mostrando ${LIMITE} de ${ordenadas.length} ocorrências. Use "⬇ Exportar CSV" pra ver todas.`]));
+  if(ordenadas.length>LIMITE) wrap.appendChild(el("div",{class:"sub",style:"padding:6px;"},[`Mostrando ${LIMITE} de ${ordenadas.length} ocorrências. Use "Exportar CSV" pra ver todas.`]));
   container.appendChild(wrap);
   return container;
 }
@@ -4219,12 +4218,12 @@ function botoesMarcarTodos(regras, acaoLoteFn){
     e.stopPropagation();
     if(pendentes === 0){ mostrarToast("Todos os serviços visíveis deste grupo já estão lançados."); return; }
     modalConfirmar("Marcar todos", `Marcar ${pendentes} serviço(s) como lançado(s) no Prevision?`, () => acaoLoteFn(regras, true));
-  }},["✓ Marcar todos"]);
+  }},["Marcar todos"]);
   const btnDesmarcar = el("button",{class:"btn secundario pequeno", title:"Desmarca todos os serviços visíveis deste grupo (voltam a pendente)", onclick:(e)=>{
     e.stopPropagation();
     if(lancados === 0){ mostrarToast("Nenhum serviço visível deste grupo está marcado."); return; }
     modalConfirmar("Desmarcar todos", `Desmarcar ${lancados} serviço(s) (voltam a pendente no Prevision)?`, () => acaoLoteFn(regras, false));
-  }},["✕ Desmarcar todos"]);
+  }},["Desmarcar todos"]);
   return el("div",{style:"display:flex;gap:6px;", onclick:e=>e.stopPropagation()},[btnMarcar, btnDesmarcar]);
 }
 
@@ -4354,7 +4353,7 @@ function renderizarPrevisionTabConteudo(){
   const area = document.getElementById("areaPrevision");
   area.innerHTML = "";
   if(regrasConcluidas.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Nenhum serviço concluído ainda. Importe uma planilha MOBUSS ou registre avanços manuais para começar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Nenhum serviço concluído ainda. Importe uma planilha MOBUSS ou registre avanços manuais para começar."])]));
     return;
   }
 
@@ -4376,7 +4375,7 @@ function renderizarPrevisionTabConteudo(){
   });
 
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,[(busca || soPendentes || statusPacoteFiltro || soNovosSemana) ? "Nada encontrado com os filtros atuais." : "Nenhum serviço concluído ainda."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,[(busca || soPendentes || statusPacoteFiltro || soNovosSemana) ? "Nada encontrado com os filtros atuais." : "Nenhum serviço concluído ainda."])]));
     return;
   }
 
@@ -4413,7 +4412,7 @@ function renderizarPagamentoTabConteudo(){
   const area = document.getElementById("areaPagamento");
   area.innerHTML = "";
   if(regrasConcluidas.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Nenhum serviço concluído ainda. Importe uma planilha MOBUSS ou registre avanços manuais para começar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Nenhum serviço concluído ainda. Importe uma planilha MOBUSS ou registre avanços manuais para começar."])]));
     return;
   }
 
@@ -4424,7 +4423,7 @@ function renderizarPagamentoTabConteudo(){
   const filtrados = regrasConcluidas.filter(r => (!soPendentes || !statusDoServico(r.chave).mesPagamento) && regraCorrespondeBusca(r, busca));
 
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,[(busca || soPendentes) ? "Nada encontrado com os filtros atuais." : "Nenhum serviço concluído ainda."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,[(busca || soPendentes) ? "Nada encontrado com os filtros atuais." : "Nenhum serviço concluído ainda."])]));
     return;
   }
 
@@ -4440,12 +4439,12 @@ function renderizarPagamentoTabConteudo(){
 function renderizarFichaCasaSimples(area, buscaInputId, linhaFn, colunas){
   const busca = normTexto(document.getElementById(buscaInputId).value).toUpperCase();
   if(!busca){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["🏠"]),el("div",null,["Selecione uma casa acima pra ver os serviços dela."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Selecione uma casa acima pra ver os serviços dela."])]));
     return;
   }
   const regrasCasa = regrasConcluidas.filter(r => r.casa === busca);
   if(regrasCasa.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["🔎"]),el("div",null,[`Nenhum serviço concluído encontrado para a casa "${busca}".`])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,[`Nenhum serviço concluído encontrado para a casa "${busca}".`])]));
     return;
   }
   area.appendChild(el("div",{class:"sub",style:"margin-bottom:10px;"},[`${regrasCasa.length} serviço(s) concluído(s) na casa ${busca}`]));
@@ -4469,12 +4468,12 @@ function renderizarFichaCasaSimples(area, buscaInputId, linhaFn, colunas){
 function renderizarFichaDaCasa(area, buscaInputId){
   const busca = normTexto(document.getElementById(buscaInputId).value).toUpperCase();
   if(!busca){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["🏠"]),el("div",null,["Selecione uma casa acima pra ver a ficha completa dela."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Selecione uma casa acima pra ver a ficha completa dela."])]));
     return;
   }
   const regrasCasa = regrasConcluidas.filter(r => r.casa === busca);
   if(regrasCasa.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["🔎"]),el("div",null,[`Nenhum serviço concluído encontrado para a casa "${busca}".`])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,[`Nenhum serviço concluído encontrado para a casa "${busca}".`])]));
     return;
   }
 
@@ -4573,11 +4572,11 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
 function chaveAvulsa(formulario, casa, sublocal, observacao){
   return [formulario, casa, sublocal||SEM_SUBLOCAL, observacao||""].join("__");
 }
-function fvsAvulsaConfirmada(quadraLote, formulario){
+function fvsAvulsaConfirmada(lote, formulario){
   return Object.entries(cfg.confirmacoesAvulsas).some(([chave, status]) => {
     if(!status.confirmado) return false;
     const partes = chave.split("__");
-    return partes[0] === formulario && extrairQuadraLote(partes[1]) === quadraLote;
+    return partes[0] === formulario && extrairLote(partes[1]) === lote;
   });
 }
 function renderizarFvsAvulsas(){
@@ -4585,7 +4584,7 @@ function renderizarFvsAvulsas(){
   if(!area) return;
   area.innerHTML = "";
   if(cfg.formulariosAvulsos.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},['Nenhuma FVS marcada como avulsa ainda — na aba "Avanço Físico", em Pendências, use o botão "📁 Avulso (só pagamento)" num formulário que não fecha pacote nenhum.']));
+    area.appendChild(el("div",{class:"msg-vazio"},['Nenhuma FVS marcada como avulsa ainda — na aba "Avanço Físico", em Pendências, use o botão "Avulso (só pagamento)" num formulário que não fecha pacote nenhum.']));
     return;
   }
   cfg.formulariosAvulsos.forEach(formulario => {
@@ -4760,7 +4759,7 @@ function renderizarMapeamentoMedicao(){
     });
   });
   if(avulsos.length){
-    area.appendChild(el("div",{class:"rotulo-categoria"},["📁 Avulsos (só comprovação de pagamento)"]));
+    area.appendChild(el("div",{class:"rotulo-categoria"},["Avulsos (só comprovação de pagamento)"]));
     avulsos.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
   }
   if(porPacote.size){
@@ -4789,10 +4788,15 @@ document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", ()
       não necessariamente é escrito igual ao do UAU (ex.: "16-12" vs "QD16LT12").
    A última tabela colada fica salva (obras/<obraId>/medicaoUau), compartilhada com o time — não
    precisa recolar toda vez que alguém abrir a página. */
-function extrairQuadraLote(casaTexto){
+// Extrai só o número do lote/casa pra comparar — tanto do formato do UAU ("QD16LT12" -> pega o
+// SEGUNDO grupo de dígitos, "12") quanto de como o MOBUSS/FVS já guarda "casa" (só um número, tipo
+// "12", sem quadra — ver construirIndice(), que já indexa só por casa+sublocal, nunca por quadra).
+// Achado real testando com dados simulados: comparar exigindo quadra+lote juntos nunca dava certo,
+// porque o lado do FVS nunca tem a quadra dentro do valor de "casa" pra começo de conversa.
+function extrairLote(casaTexto){
   const nums = String(casaTexto||"").match(/\d+/g);
-  if(!nums || nums.length < 2) return null;
-  return nums[0].replace(/^0+/,"") + "|" + nums[1].replace(/^0+/,"");
+  if(!nums || nums.length === 0) return null;
+  return (nums.length >= 2 ? nums[1] : nums[0]).replace(/^0+/,"") || "0";
 }
 function parseTabelaColada(texto){
   const linhas = texto.split(/\r?\n/).map(l=>l.split("\t")).filter(cols => cols.some(c=>c.trim()!==""));
@@ -4802,12 +4806,12 @@ function parseTabelaColada(texto){
   // a colagem já começa direto no cabeçalho (linha 0).
   let idxHeader = 0;
   for(let i=0;i<linhas.length-1;i++){
-    if(extrairQuadraLote(linhas[i+1][0])){ idxHeader = i; break; }
+    if(extrairLote(linhas[i+1][0])){ idxHeader = i; break; }
   }
   const header = linhas[idxHeader];
   const codigos = header.slice(1).map(c=>c.trim()).filter(Boolean);
   const dados = linhas.slice(idxHeader+1)
-    .map(cols => ({ casa: cols[0].trim(), quadraLote: extrairQuadraLote(cols[0]), valores: cols.slice(1) }))
+    .map(cols => ({ casa: cols[0].trim(), lote: extrairLote(cols[0]), valores: cols.slice(1) }))
     .filter(r => r.casa);
   if(codigos.length === 0 || dados.length === 0) return null;
   return { codigos, linhas: dados };
@@ -4892,10 +4896,10 @@ async function carregarMedicaoUau(){
 }
 
 // Pra uma casa (quadra+lote) e um pacoteId+servico, existe algum registro de FVS concluído que bate?
-// Casa aqui é comparada só pelos números de quadra/lote (ver extrairQuadraLote) — o texto exato de
+// Casa aqui é comparada só pelos números de quadra/lote (ver extrairLote) — o texto exato de
 // "casa" pode ser escrito diferente entre MOBUSS e UAU.
-function temFvsConcluida(quadraLote, pacoteId, servico){
-  return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairQuadraLote(r.casa) === quadraLote);
+function temFvsConcluida(lote, pacoteId, servico){
+  return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
 }
 
 function renderizarMedicaoUau(){
@@ -4917,14 +4921,14 @@ function renderizarMedicaoUau(){
       totalMedido++;
       const mapa = mapaCodigo.get(codigo);
       if(!mapa){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"código de serviço não vinculado a nenhum pacote/serviço nem formulário avulso"}); return; }
-      if(!linha.quadraLote){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"casa não reconhecida (esperado formato tipo QD16LT12)"}); return; }
+      if(!linha.lote){ semFvs.push({casa:linha.casa, codigo, valor, motivo:"casa não reconhecida (esperado formato tipo QD16LT12)"}); return; }
       if(mapa.tipo === "avulso"){
-        if(fvsAvulsaConfirmada(linha.quadraLote, mapa.formulario)){ totalOk++; return; }
+        if(fvsAvulsaConfirmada(linha.lote, mapa.formulario)){ totalOk++; return; }
         semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS avulsa "${mapa.formulario}" ainda não confirmada (ver "FVS Avulsas")`});
         return;
       }
       const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
-      if(temFvsConcluida(linha.quadraLote, mapa.pacoteId, mapa.servico)){ totalOk++; return; }
+      if(temFvsConcluida(linha.lote, mapa.pacoteId, mapa.servico)){ totalOk++; return; }
       semFvs.push({casa:linha.casa, codigo, valor, motivo:`FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não está Encerrada`});
     });
   });
@@ -4979,7 +4983,7 @@ function renderizarResumo(){
   const area = document.getElementById("areaResumo");
   area.innerHTML = "";
   if(!dados.processado && cfg.avancosManuais.length===0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Importe uma planilha MOBUSS para começar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Importe uma planilha MOBUSS para começar."])]));
     return;
   }
 
@@ -5007,12 +5011,12 @@ function renderizarResumo(){
   ]));
 
   if(itensSemana.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,[selecao ? "Nenhum avanço registrado nessa versão." : "Nada novo desde a última versão arquivada — veja o filtro \"🆕 Só novos desta semana\" na aba Avanço Físico pra revisar e arquivar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,[selecao ? "Nenhum avanço registrado nessa versão." : "Nada novo desde a última versão arquivada — veja o filtro \"🆕 Só novos desta semana\" na aba Avanço Físico pra revisar e arquivar."])]));
     return;
   }
 
   if(soPendentes && pendentesPrevisionSemana === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,["Tudo já foi lançado no Prevision nesta semana."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Tudo já foi lançado no Prevision nesta semana."])]));
     return;
   }
 
@@ -5028,7 +5032,7 @@ function renderizarResumo(){
     blocosPacote.forEach(b => area.appendChild(b));
   });
   if(!algumBloco){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["✅"]),el("div",null,["Tudo já foi lançado no Prevision nesta semana."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Tudo já foi lançado no Prevision nesta semana."])]));
   }
 }
 
@@ -5135,7 +5139,7 @@ function renderizarCompleto(){
     breadcrumb.innerHTML = "";
     toolbar.style.display = "none";
     if(!dados.processado && cfg.avancosManuais.length===0){
-      area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Importe uma planilha MOBUSS para começar."])]));
+      area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Importe uma planilha MOBUSS para começar."])]));
       return;
     }
     renderizarFichaDaCasa(area, "buscaCasaCompleto");
@@ -5146,7 +5150,7 @@ function renderizarCompleto(){
 
   if(!dados.processado && cfg.avancosManuais.length===0){
     toolbar.style.display = "none";
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["📄"]),el("div",null,["Importe uma planilha MOBUSS para começar."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Importe uma planilha MOBUSS para começar."])]));
     return;
   }
 
@@ -5234,7 +5238,7 @@ function renderizarCompletoNivelLista(area, pacoteId){
   const lista = filtrarLista(todasCasas, texto, "", status);
 
   if(lista.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[el("div",{class:"grande"},["🔎"]),el("div",null,["Nenhum registro encontrado com os filtros atuais."])]));
+    area.appendChild(el("div",{class:"msg-vazio"},[el("div",null,["Nenhum registro encontrado com os filtros atuais."])]));
     return;
   }
 
