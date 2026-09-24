@@ -2766,8 +2766,19 @@ function atualizarBotaoSalvarCadastro(){
   btn.textContent = cadastroSujo ? "💾 Salvar alterações •" : "💾 Salvar alterações";
 }
 
+// true quando há avanço da semana (pacote completo novo, ou serviço concluído novo) que ainda não
+// entrou em nenhuma versão arquivada — mesmo criterio que salvarAvancoAtual() usa pra decidir se há
+// algo novo pra salvar. Isso não é sobre os dados terem sido gravados (planilha e marcações de
+// Prevision/pagamento já salvam na hora) — é sobre ela ainda não ter clicado "💾 Salvar avanço" pra
+// arquivar a semana, o que os deixaria de fora do histórico de versões se ela esquecer.
+function haAvancoNaoArquivado(){
+  if(avancos.length === 0 && regrasConcluidas.length === 0) return false;
+  if(avancosNovos.length > 0) return true;
+  const chavesServicoNovas = regrasConcluidas.filter(r => !baselineChavesServico().has(r.chave));
+  return chavesServicoNovas.length > 0;
+}
 window.addEventListener("beforeunload", e => {
-  if(cadastroSujo){ e.preventDefault(); e.returnValue = ""; }
+  if(cadastroSujo || haAvancoNaoArquivado()){ e.preventDefault(); e.returnValue = ""; }
 });
 
 function renderizarCadastro(){
