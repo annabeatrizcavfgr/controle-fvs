@@ -466,13 +466,8 @@
 
     <div class="painel" id="painelMedicaoUau">
       <h3 style="margin-top:0;">Conferência de Medição (UAU)</h3>
-      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
-      <div class="toolbar" style="margin-bottom:8px;">
-        <input type="text" id="inpContratoMedicaoUau" placeholder="Nº do contrato" style="max-width:160px;">
-        <input type="text" id="inpBoletimMedicaoUau" placeholder="Nº do boletim de medição" style="max-width:200px;">
-        <select id="selEmpresaMedicaoUau" style="max-width:260px;"><option value="">Empresa responsável…</option></select>
-      </div>
-      <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
+      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela crua da planilha de consulta (a mesma que já usa, com uma linha por item medido — não a tabela dinâmica) e cole aqui, com o cabeçalho junto. O app reconhece as colunas Cod_contrato, Cod_medicao, Descr_fornecedor, Cod_itemcontrato, Descr_itemcontrato, Descr_itemestrutura e Val_Acompanhado, e confere automaticamente se cada item medido já tem a FVS correspondente Encerrada.</div>
+      <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada, com o cabeçalho…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
       <div class="toolbar" style="margin-top:8px;">
         <button class="btn" id="btnProcessarMedicaoUau">Processar tabela colada</button>
         <span class="sub" id="medicaoUauMeta" style="margin:0;"></span>
@@ -739,7 +734,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao","inpContratoMedicaoUau","inpBoletimMedicaoUau","selEmpresaMedicaoUau"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -4724,16 +4719,20 @@ document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", ()
 });
 
 /* ===================== Conferência de Medição (UAU) =====================
-   Ela cola aqui a tabela Casa × Serviço copiada do UAU/Excel (formato: 1ª coluna = casa tipo
-   "QD16LT12", demais colunas = códigos de serviço tipo "S00296", células = valor medido). O app:
-   1) reconhece os códigos de serviço já mapeados (cfg.mapeamentosMedicao) pro pacote/serviço da FVS;
-   2) pra código novo, pede um mapeamento rápido (reaproveita criarSeletorPacoteServico, o mesmo
+   Ela cola aqui a tabela CRUA da planilha de consulta (a mesma consulta SQL de sempre, uma linha
+   por item medido, com o cabeçalho de verdade junto — não a tabela dinâmica/pivotada). Cada linha já
+   traz contrato, boletim, empresa, código, descrição, casa e valor juntos, então não precisa mais
+   digitar nada à mão antes de colar. O app:
+   1) reconhece as colunas pelo NOME do cabeçalho (ver localizarColunasMedicao), não pela posição —
+      assim funciona mesmo se a consulta ganhar/perder colunas no meio;
+   2) reconhece os códigos de serviço já mapeados (cfg.mapeamentosMedicao) pro pacote/serviço da FVS;
+   3) pra código novo, pede um mapeamento rápido (reaproveita criarSeletorPacoteServico, o mesmo
       seletor usado em Pendências) — fica salvo pra próxima colagem não perguntar de novo;
-   3) cruza cada casa/serviço medido com o que a FVS já marcou como concluído (regrasConcluidas) —
+   4) cruza cada casa/serviço medido com o que a FVS já marcou como concluído (regrasConcluidas) —
       usando só os números de quadra+lote extraídos da casa, já que o formato de "casa" no MOBUSS
       não necessariamente é escrito igual ao do UAU (ex.: "16-12" vs "QD16LT12").
-   A última tabela colada fica salva (obras/<obraId>/medicaoUau), compartilhada com o time — não
-   precisa recolar toda vez que alguém abrir a página. */
+   Todos os itens ficam salvos (obras/<obraId>/medicaoUau), compartilhado com o time — não precisa
+   recolar toda vez que alguém abrir a página. */
 // Extrai só o número do lote/casa pra comparar — tanto do formato do UAU ("QD16LT12" -> pega o
 // SEGUNDO grupo de dígitos, "12") quanto de como o MOBUSS/FVS já guarda "casa" (só um número, tipo
 // "12", sem quadra — ver construirIndice(), que já indexa só por casa+sublocal, nunca por quadra).
@@ -4744,30 +4743,75 @@ function extrairLote(casaTexto){
   if(!nums || nums.length === 0) return null;
   return (nums.length >= 2 ? nums[1] : nums[0]).replace(/^0+/,"") || "0";
 }
+// Acha cada coluna pelo NOME normalizado do cabeçalho (maiúsculo, sem acento, só A-Z0-9) em vez de
+// pela posição — a consulta é sempre a mesma, mas colunas extras/reordenadas não devem quebrar o
+// reconhecimento. Os testes com o cabeçalho real (Cod_obra, Cod_contrato, Descr_fornecedor,
+// Cod_itemcontrato, Cod_composicaoacomp, Cod_unid, Descr_itemcontrato, Qtde_acompanhada,
+// Val_Acompanhado, Cod_itemorcamento, Cod_numorcamento, Desc_orcamento, Cod_estrutura,
+// Descr_itemestrutura, Cod_sequenciaorca, Cod_medicao, Data_acompanhamento, Data_medicao,
+// Status_med) confirmaram que cada teste abaixo bate em EXATAMENTE uma coluna.
+function normalizarHeaderMedicao(s){
+  return normTexto(s).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Z0-9]/g,"");
+}
+const NOMES_COLUNAS_MEDICAO = {
+  contrato: "Cod_contrato", boletim: "Cod_medicao", empresa: "Descr_fornecedor",
+  codigo: "Cod_composicaoacomp", descricao: "Descr_itemcontrato", casa: "Descr_itemestrutura", valor: "Val_Acompanhado"
+};
+function localizarColunasMedicao(headerRow){
+  const normalizados = headerRow.map(normalizarHeaderMedicao);
+  function indiceDe(teste){
+    for(let i=0;i<normalizados.length;i++){ if(teste(normalizados[i])) return i; }
+    return -1;
+  }
+  return {
+    contrato: indiceDe(h => h.includes("CONTRATO") && !h.includes("ITEM")),
+    boletim: indiceDe(h => h.includes("MEDICAO") && !h.includes("DATA")),
+    empresa: indiceDe(h => h.includes("FORNECEDOR")),
+    // Cod_itemcontrato é só a numeração da linha DENTRO de cada contrato (reaproveitada/diferente de
+    // contrato pra contrato, mesmo pro mesmo serviço — achado real testando com dados de verdade:
+    // "JUNTA DE TRABALHO..." é item 1 no contrato 408 e item 28 no contrato 299). Quem identifica o
+    // SERVIÇO de forma estável entre contratos é Cod_composicaoacomp (ex.: "S00296") — é esse que vira
+    // "código" no mapeamento, igual já era no formato antigo (tabela pivotada usava esse mesmo código
+    // como cabeçalho de coluna).
+    codigo: indiceDe(h => h.includes("COMPOSICAOACOMP")),
+    descricao: indiceDe(h => h.includes("ITEMCONTRATO") && h.includes("DESCR")),
+    casa: indiceDe(h => h.includes("ITEMESTRUTURA") && h.includes("DESCR")),
+    valor: indiceDe(h => h.includes("ACOMPANHAD") && h.includes("VAL"))
+  };
+}
+// Formato flat: uma linha por item medido, cabeçalho de verdade na 1ª linha (ver comentário acima).
+// Cada linha já traz contrato/boletim/empresa/código/descrição/casa/valor juntos — nada de digitar
+// nada antes de colar. Retorna {erro} com o nome da coluna que faltou quando o cabeçalho colado não
+// bate com o esperado, em vez de uma mensagem genérica.
 function parseTabelaColada(texto){
   const linhas = texto.split(/\r?\n/).map(l=>l.split("\t")).filter(cols => cols.some(c=>c.trim()!==""));
-  if(linhas.length < 2) return null;
-  // acha a linha de cabeçalho: a primeira linha cuja 1ª célula não é numérica e a linha seguinte
-  // já parece ser uma casa (tem quadra+lote reconhecíveis) — se não achar esse padrão, assume que
-  // a colagem já começa direto no cabeçalho (linha 0).
-  let idxHeader = 0;
-  for(let i=0;i<linhas.length-1;i++){
-    if(extrairLote(linhas[i+1][0])){ idxHeader = i; break; }
+  if(linhas.length < 2){
+    return { erro: "Cole a tabela com o cabeçalho junto (a primeira linha precisa ter os nomes das colunas) e pelo menos uma linha de dados." };
   }
-  const header = linhas[idxHeader];
-  const codigos = header.slice(1).map(c=>c.trim()).filter(Boolean);
-  // linha de descrição (se existir) fica logo ACIMA da linha de códigos — só serve pra sugerir
-  // pacote/serviço na hora de mapear um código novo (ver sugerirPacoteServico); nunca é obrigatória.
+  const colunas = localizarColunasMedicao(linhas[0]);
+  const faltando = Object.entries(colunas).filter(([,i])=>i<0).map(([chave])=>NOMES_COLUNAS_MEDICAO[chave]);
+  if(faltando.length){
+    return { erro: `Não encontrei a coluna "${faltando.join('", "')}" no cabeçalho colado. Confirme que copiou a tabela crua da planilha de consulta (com o cabeçalho) e não a tabela dinâmica.` };
+  }
+  const dados = linhas.slice(1).map(cols => {
+    const casa = (cols[colunas.casa]||"").trim();
+    return {
+      casa, lote: extrairLote(casa),
+      codigo: (cols[colunas.codigo]||"").trim(),
+      descricao: (cols[colunas.descricao]||"").trim(),
+      contrato: (cols[colunas.contrato]||"").trim(),
+      boletim: (cols[colunas.boletim]||"").trim(),
+      empresa: (cols[colunas.empresa]||"").trim(),
+      bruto: (cols[colunas.valor]||"").trim()
+    };
+  }).filter(r => r.casa && r.codigo);
+  if(dados.length === 0) return { erro: "Não encontrei nenhuma linha de dados válida abaixo do cabeçalho." };
+  const codigos = [...new Set(dados.map(r=>r.codigo))];
+  // guarda a 1ª descrição não-vazia encontrada pra cada código — só serve pra sugerir pacote/serviço
+  // na hora de mapear um código novo (ver sugerirPacoteServico); nunca é obrigatória.
   const descricoes = {};
-  if(idxHeader > 0){
-    const linhaDesc = linhas[idxHeader-1];
-    codigos.forEach((cod,i) => { const d = (linhaDesc[i+1]||"").trim(); if(d) descricoes[cod] = d; });
-  }
-  const dados = linhas.slice(idxHeader+1)
-    .map(cols => ({ casa: cols[0].trim(), lote: extrairLote(cols[0]), valores: cols.slice(1) }))
-    .filter(r => r.casa);
-  if(codigos.length === 0 || dados.length === 0) return null;
-  return { codigos, linhas: dados, descricoes };
+  dados.forEach(r => { if(r.descricao && !descricoes[r.codigo]) descricoes[r.codigo] = r.descricao; });
+  return { linhas: dados, codigos, descricoes };
 }
 
 function codigosNaoMapeados(codigos){
@@ -4828,10 +4872,14 @@ function sugerirPacoteServico(descricao){
   return melhor;
 }
 
-// chave estável por casa+código — cada colagem nova ATUALIZA o valor medido do item (se já existia),
-// preservando pago/fornecedor/data já preenchidos; nunca perde o que já foi registrado antes. Isso é
-// o que permite colar vários espelhos de medição diferentes, um de cada vez, sem um apagar o outro.
-function chaveMedicaoItem(casa, codigo){ return normTexto(casa).toUpperCase()+"__"+codigo; }
+// chave estável por casa+código+contrato+boletim — o MESMO casa+código pode ser medido de novo em
+// boletins diferentes (medição é cumulativa mês a mês), então cada boletim tem que virar um item à
+// parte, nunca sobrescrever o anterior. Uma colagem nova só ATUALIZA o valor de um item que já existia
+// se for exatamente o mesmo contrato+boletim (recolar o mesmo espelho de novo), preservando sempre
+// pago/fornecedor/data já preenchidos.
+function chaveMedicaoItem(casa, codigo, contrato, boletim){
+  return normTexto(casa).toUpperCase()+"__"+codigo+"__"+(contrato||"")+"__"+(boletim||"");
+}
 
 // Aplica os itens de uma tabela já colada em medicaoItens — só os códigos JÁ MAPEADOS entram; os
 // que ainda não têm pacote/serviço ficam de fora até ela resolver o rascunho correspondente (ver
@@ -4840,41 +4888,32 @@ function chaveMedicaoItem(casa, codigo){ return normTexto(casa).toUpperCase()+"_
 function aplicarItensDaTabela(tabela){
   let novos = 0, atualizados = 0;
   tabela.linhas.forEach(linha => {
-    tabela.codigos.forEach((codigo, i) => {
-      if(!cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)) return;
-      const bruto = (linha.valores[i]||"").trim();
-      if(!bruto || bruto === "-") return;
-      const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
-      if(!valor) return;
-      const chave = chaveMedicaoItem(linha.casa, codigo);
-      const atual = medicaoItens[chave];
-      medicaoItens[chave] = {
-        casa: linha.casa, codigo, valor,
-        contrato: tabela.contrato || (atual?atual.contrato:"") || "",
-        boletim: tabela.boletim || (atual?atual.boletim:"") || "",
-        empresa: tabela.empresa || (atual?atual.empresa:"") || "",
-        pago: atual ? atual.pago : false,
-        fornecedorPago: atual ? atual.fornecedorPago : "",
-        dataPagamento: atual ? atual.dataPagamento : null,
-        atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
-      };
-      if(atual) atualizados++; else novos++;
-    });
+    if(!cfg.mapeamentosMedicao.some(m=>m.codigo===linha.codigo)) return;
+    const bruto = linha.bruto;
+    if(!bruto || bruto === "-") return;
+    const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
+    if(!valor) return;
+    const chave = chaveMedicaoItem(linha.casa, linha.codigo, linha.contrato, linha.boletim);
+    const atual = medicaoItens[chave];
+    medicaoItens[chave] = {
+      casa: linha.casa, codigo: linha.codigo, valor,
+      contrato: linha.contrato, boletim: linha.boletim, empresa: linha.empresa,
+      pago: atual ? atual.pago : false,
+      fornecedorPago: atual ? atual.fornecedorPago : "",
+      dataPagamento: atual ? atual.dataPagamento : null,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
+    };
+    if(atual) atualizados++; else novos++;
   });
   return { novos, atualizados };
 }
 
 let ultimaTabelaColadaPendente = null; // guarda a última colagem — reaplicada quando um rascunho de código é confirmado
 async function processarColagemMedicaoUau(){
-  const contrato = document.getElementById("inpContratoMedicaoUau").value.trim();
-  const boletim = document.getElementById("inpBoletimMedicaoUau").value.trim();
-  const empresa = document.getElementById("selEmpresaMedicaoUau").value;
-  if(!contrato || !boletim || !empresa){ mostrarToast("Preencha o nº do contrato, o nº do boletim de medição e a empresa responsável antes de processar."); return; }
   const texto = document.getElementById("colaMedicaoUau").value;
-  if(!texto.trim()){ mostrarToast("Cole a tabela copiada do UAU/Excel antes de processar."); return; }
+  if(!texto.trim()){ mostrarToast("Cole a tabela copiada da planilha de consulta antes de processar."); return; }
   const tabela = parseTabelaColada(texto);
-  if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
-  tabela.contrato = contrato; tabela.boletim = boletim; tabela.empresa = empresa;
+  if(tabela.erro){ mostrarToast(tabela.erro); return; }
   ultimaTabelaColadaPendente = tabela;
   // guarda a descrição de cada código (mesmo dos já mapeados) — fica disponível na tabela de
   // resultados e em colagens futuras que não tragam a linha de descrição de novo.
@@ -4921,27 +4960,12 @@ function temFvsConcluida(lote, pacoteId, servico){
   return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
 }
 
-// Empresas conhecidas pro seletor "Empresa responsável" — só as que já aparecem no FVS (campo
-// "Nome do Fornecedor Avaliado" do MOBUSS), como ela pediu, pra não digitar nome livre e arriscar
-// grafia diferente do que já existe.
-function atualizarOpcoesEmpresaMedicao(){
-  const sel = document.getElementById("selEmpresaMedicaoUau");
-  if(!sel) return;
-  const atual = sel.value;
-  const empresas = [...new Set(dados.registros.map(r=>r.fornecedor).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-  sel.innerHTML = "";
-  sel.appendChild(el("option",{value:""},["Empresa responsável…"]));
-  empresas.forEach(e => sel.appendChild(el("option",{value:e},[e])));
-  if(empresas.includes(atual)) sel.value = atual;
-}
-
 let buscaMedicaoUauTexto = "";
 let mostrarEmEsperaMedicao = false;
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
   if(!area || !meta) return;
-  atualizarOpcoesEmpresaMedicao();
   const todos = Object.entries(medicaoItens).map(([chave,item])=>({chave, ...item}));
   if(todos.length === 0){ area.innerHTML = ""; meta.textContent = ""; return; }
   meta.textContent = `${todos.length} item(ns) medido(s) no total`;
