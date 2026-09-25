@@ -5105,11 +5105,11 @@ function renderizarMedicaoUau(){
       wrapContratos.appendChild(el("div",{class:"chip", style:`justify-content:space-between;padding:6px 8px 6px 12px;gap:10px;${corFundo}`},[
         el("b",null,[`Contrato ${c} (${qtd})`]),
         el("div",{style:"display:flex;gap:6px;flex-shrink:0;"},[
-          el("button",{class:"btn secundario pequeno", onclick:()=>{
+          el("button",{class:"btn secundario pequeno", title: emEspera ? "Retomar contrato" : "Colocar contrato em espera", onclick:()=>{
             if(emEspera) contratosEmEspera.delete(c); else contratosEmEspera.add(c);
             salvarMedicaoUau();
             renderizarMedicaoUau();
-          }},[emEspera ? "Retomar" : "Colocar em espera"]),
+          }},[emEspera ? "▶" : "⏸"]),
           el("button",{class:"btn secundario pequeno", onclick:()=>{
             if(validado) contratosValidados.delete(c); else contratosValidados.add(c);
             salvarMedicaoUau();
