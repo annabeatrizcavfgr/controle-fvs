@@ -467,6 +467,11 @@
     <div class="painel" id="painelMedicaoUau">
       <h3 style="margin-top:0;">Conferência de Medição (UAU)</h3>
       <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela Casa × Serviço direto do UAU/Excel (selecione as células e Ctrl+C) e cole aqui — o app confere automaticamente se cada casa/serviço medido já tem a FVS correspondente Encerrada.</div>
+      <div class="toolbar" style="margin-bottom:8px;">
+        <input type="text" id="inpContratoMedicaoUau" placeholder="Nº do contrato" style="max-width:160px;">
+        <input type="text" id="inpBoletimMedicaoUau" placeholder="Nº do boletim de medição" style="max-width:200px;">
+        <select id="selEmpresaMedicaoUau" style="max-width:260px;"><option value="">Empresa responsável…</option></select>
+      </div>
       <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
       <div class="toolbar" style="margin-top:8px;">
         <button class="btn" id="btnProcessarMedicaoUau">Processar tabela colada</button>
@@ -734,7 +739,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao","inpContratoMedicaoUau","inpBoletimMedicaoUau","selEmpresaMedicaoUau"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -4845,9 +4850,13 @@ function aplicarItensDaTabela(tabela){
       const atual = medicaoItens[chave];
       medicaoItens[chave] = {
         casa: linha.casa, codigo, valor,
+        contrato: tabela.contrato || (atual?atual.contrato:"") || "",
+        boletim: tabela.boletim || (atual?atual.boletim:"") || "",
+        empresa: tabela.empresa || (atual?atual.empresa:"") || "",
         pago: atual ? atual.pago : false,
         fornecedorPago: atual ? atual.fornecedorPago : "",
         dataPagamento: atual ? atual.dataPagamento : null,
+        emEspera: atual ? !!atual.emEspera : false,
         atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
       };
       if(atual) atualizados++; else novos++;
@@ -4858,10 +4867,15 @@ function aplicarItensDaTabela(tabela){
 
 let ultimaTabelaColadaPendente = null; // guarda a última colagem — reaplicada quando um rascunho de código é confirmado
 async function processarColagemMedicaoUau(){
+  const contrato = document.getElementById("inpContratoMedicaoUau").value.trim();
+  const boletim = document.getElementById("inpBoletimMedicaoUau").value.trim();
+  const empresa = document.getElementById("selEmpresaMedicaoUau").value;
+  if(!contrato || !boletim || !empresa){ mostrarToast("Preencha o nº do contrato, o nº do boletim de medição e a empresa responsável antes de processar."); return; }
   const texto = document.getElementById("colaMedicaoUau").value;
   if(!texto.trim()){ mostrarToast("Cole a tabela copiada do UAU/Excel antes de processar."); return; }
   const tabela = parseTabelaColada(texto);
   if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
+  tabela.contrato = contrato; tabela.boletim = boletim; tabela.empresa = empresa;
   ultimaTabelaColadaPendente = tabela;
   // guarda a descrição de cada código (mesmo dos já mapeados) — fica disponível na tabela de
   // resultados e em colagens futuras que não tragam a linha de descrição de novo.
@@ -4905,17 +4919,33 @@ function temFvsConcluida(lote, pacoteId, servico){
   return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
 }
 
+// Empresas conhecidas pro seletor "Empresa responsável" — só as que já aparecem no FVS (campo
+// "Nome do Fornecedor Avaliado" do MOBUSS), como ela pediu, pra não digitar nome livre e arriscar
+// grafia diferente do que já existe.
+function atualizarOpcoesEmpresaMedicao(){
+  const sel = document.getElementById("selEmpresaMedicaoUau");
+  if(!sel) return;
+  const atual = sel.value;
+  const empresas = [...new Set(dados.registros.map(r=>r.fornecedor).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  sel.innerHTML = "";
+  sel.appendChild(el("option",{value:""},["Empresa responsável…"]));
+  empresas.forEach(e => sel.appendChild(el("option",{value:e},[e])));
+  if(empresas.includes(atual)) sel.value = atual;
+}
+
 let buscaMedicaoUauTexto = "";
+let mostrarEmEsperaMedicao = false;
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
   if(!area || !meta) return;
+  atualizarOpcoesEmpresaMedicao();
   const todos = Object.entries(medicaoItens).map(([chave,item])=>({chave, ...item}));
   if(todos.length === 0){ area.innerHTML = ""; meta.textContent = ""; return; }
   meta.textContent = `${todos.length} item(ns) medido(s) no total`;
 
   const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
-  let totalOk = 0, totalPago = 0;
+  let totalOk = 0, totalPago = 0, totalEmEspera = 0;
   const enriquecidos = todos.map(item => {
     const mapa = mapaCodigo.get(item.codigo);
     const lote = extrairLote(item.casa);
@@ -4929,6 +4959,7 @@ function renderizarMedicaoUau(){
     }
     if(comFvs) totalOk++;
     if(item.pago) totalPago++;
+    if(item.emEspera) totalEmEspera++;
     return { ...item, mapa, comFvs, motivo };
   });
 
@@ -4938,25 +4969,40 @@ function renderizarMedicaoUau(){
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(todos.length-totalOk)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalPago)]), el("div",{class:"rotulo"},["Pagos"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
   ]));
 
-  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código ou pacote/serviço…", value: buscaMedicaoUauTexto, style:"width:100%;max-width:360px;margin:10px 0;"});
+  const toolbar = el("div",{class:"toolbar",style:"margin:10px 0;"});
+  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
   inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
-  area.appendChild(inpBusca);
+  toolbar.appendChild(inpBusca);
+  const lblEmEspera = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
+  const chkEmEspera = el("input",{type:"checkbox"});
+  chkEmEspera.checked = mostrarEmEsperaMedicao;
+  chkEmEspera.addEventListener("change", () => { mostrarEmEsperaMedicao = chkEmEspera.checked; renderizarMedicaoUau(); });
+  lblEmEspera.appendChild(chkEmEspera);
+  lblEmEspera.appendChild(document.createTextNode(`Mostrar itens em espera (${totalEmEspera})`));
+  toolbar.appendChild(lblEmEspera);
+  area.appendChild(toolbar);
 
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
-  const filtrados = !busca ? enriquecidos : enriquecidos.filter(it => {
-    const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
-    const descricao = cfg.descricoesUau[it.codigo] || "";
-    return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
-      descricao.toLowerCase().includes(busca) ||
-      (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
-      (pacote && pacote.nome.toLowerCase().includes(busca));
-  });
+  let filtrados = enriquecidos.filter(it => !it.emEspera || mostrarEmEsperaMedicao);
+  if(busca){
+    filtrados = filtrados.filter(it => {
+      const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+      const descricao = cfg.descricoesUau[it.codigo] || "";
+      return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
+        descricao.toLowerCase().includes(busca) ||
+        (it.contrato||"").toLowerCase().includes(busca) || (it.boletim||"").toLowerCase().includes(busca) ||
+        (it.empresa||"").toLowerCase().includes(busca) ||
+        (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
+        (pacote && pacote.nome.toLowerCase().includes(busca));
+    });
+  }
   filtrados.sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
 
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},["Nada encontrado com essa busca."]));
+    area.appendChild(el("div",{class:"msg-vazio"},[busca ? "Nada encontrado com essa busca." : "Nenhum item pendente — tudo que está \"em espera\" foi filtrado (marque a caixa acima pra ver)."]));
     return;
   }
 
@@ -4966,7 +5012,8 @@ function renderizarMedicaoUau(){
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
         el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
-        el("th",null,["Situação FVS"]),el("th",null,["Pago?"]),el("th",null,["Fornecedor pago"]),el("th",null,["Data pagamento"])
+        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Empresa"]),
+        el("th",null,["Pago?"]),el("th",null,["Fornecedor pago"]),el("th",null,["Data pagamento"]),el("th",null,[""])
       ])]),
       el("tbody",null, mostrar.map(item => {
         const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
@@ -4982,15 +5029,22 @@ function renderizarMedicaoUau(){
         chkPago.addEventListener("change", () => { salvarItem(); renderizarMedicaoUau(); });
         inpFornecedor.addEventListener("change", salvarItem);
         inpData.addEventListener("change", salvarItem);
-        return el("tr",{class: item.pago?"linha-ok":""},[
+        const btnEspera = el("button",{class:"btn secundario pequeno", title: item.emEspera ? "Voltar esse item pra lista principal" : "Tirar esse item da tela por enquanto (ex.: vai averiguar a FVS faltando) — continua salvo, só filtrado", onclick:()=>{
+          medicaoItens[item.chave] = { ...medicaoItens[item.chave], emEspera: !item.emEspera };
+          salvarMedicaoUau();
+          renderizarMedicaoUau();
+        }},[item.emEspera ? "Retomar" : "Colocar em espera"]);
+        return el("tr",{class: item.pago?"linha-ok":(item.emEspera?"":"")},[
           el("td",null,[item.casa]), el("td",null,[item.codigo]),
           el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
           el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"])]),
+          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"]), item.emEspera ? el("span",{class:"badge info",style:"margin-left:4px;"},["Em espera"]) : null].filter(Boolean)),
+          el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]), el("td",null,[item.empresa||"—"]),
           el("td",null,[chkPago]),
           el("td",null,[inpFornecedor]),
-          el("td",null,[inpData])
+          el("td",null,[inpData]),
+          el("td",null,[btnEspera])
         ]);
       }))
     ])
