@@ -457,10 +457,10 @@
 
     <div class="painel" id="painelMapeamentoMedicao">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
-        <h3 style="margin:0;">Códigos de medição (UAU) → Pacote/Serviço do FVS</h3>
+        <h3 style="margin:0;">Análise por item de contrato</h3>
         <button class="btn secundario pequeno" id="btnNovoMapeamentoMedicao">+ Novo mapeamento</button>
       </div>
-      <div class="sub" style="margin:4px 0 12px;">Cadastre aqui a quais pacote/serviço do FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular.</div>
+      <div class="sub" style="margin:4px 0 12px;">Cadastre aqui a quais pacote/serviço da FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular.</div>
       <div id="listaMapeamentoMedicao"></div>
     </div>
 
@@ -1731,7 +1731,7 @@ function processarArquivo(nomeArquivo, workbook, dataImportacao){
   const infoArquivo = { nome: nomeArquivo, totalLinhas:0, encerradas:0, ignoradasSituacao:0, abasProcessadas:[], abasIgnoradas:[], dataImportacao: dataImportacao || new Date() };
 
   // Achado real (2026-09-23): o MOBUSS exporta o workbook com mais de uma aba (ex.: um "Relatório"
-  // detalhado além do "Resumo Formulários Realizados"), e cada linha do FVS pode aparecer em MAIS
+  // detalhado além do "Resumo Formulários Realizados"), e cada linha da FVS pode aparecer em MAIS
   // DE UMA aba, em formatos diferentes — se qualquer aba com colunas compatíveis fosse processada,
   // a mesma FVS entrava duas vezes em dados.registros. Só a aba "Resumo Formulários Realizados"
   // (o relatório que este app foi desenhado pra ler) é processada; qualquer outra aba, mesmo que
@@ -4580,7 +4580,7 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
    já existente sem precisar excluir e recriar. */
 // linha (não-modal) de um mapeamento existente — o seletor de pacote fica visível pra poder
 // reclassificar (o item "pula" de grupo na hora, já que a lista é toda re-renderizada na troca).
-// Seletor compartilhado do "alvo" de um mapeamento — Pacote/Serviço do FVS (o normal) ou um
+// Seletor compartilhado do "alvo" de um mapeamento — Pacote/Serviço da FVS (o normal) ou um
 // Formulário Avulso (pra FVS que nunca fecham pacote, só existem pra comprovar pagamento — ver
 // "FVS Avulsas"). `alvo` é mutado direto ({tipo, pacoteId, servico, formulario}); onChange() roda
 // depois de qualquer edição, e quem chama decide se isso já salva/re-renderiza ou só guarda rascunho.
@@ -4620,48 +4620,67 @@ function linhaMapeamentoMedicao(m){
 
 // linha nova em edição — some da tela assim que o código é confirmado (vira uma linha normal,
 // já dentro do grupo do pacote escolhido) ou some se ela clicar noutro lugar sem preencher nada.
-let novaLinhaMapeamentoMedicao = null; // {pacoteId, servico} enquanto ainda não tem código confirmado
-function linhaNovaMapeamentoMedicao(){
-  const rascunho = novaLinhaMapeamentoMedicao;
-  const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)", style:"margin-bottom:4px;"});
-  const selPacote = el("select",null,[]);
+// Rascunhos de mapeamento em edição — sempre em linha, nunca em caixa/modal. Populados tanto pelo
+// botão "+ Novo mapeamento" (código vazio, ela digita) quanto por códigos novos detectados numa
+// colagem (código já vem preenchido e travado — só falta escolher pacote/serviço, com sugestão
+// pré-selecionada quando a colagem trouxe uma linha de descrição). Vários podem existir ao mesmo
+// tempo (uma colagem pode trazer vários códigos novos de uma vez).
+let rascunhosMapeamentoMedicao = []; // [{codigo, travado, pacoteId, servico, descricao}]
+
+function linhaRascunhoMapeamento(rascunho){
+  const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)", value: rascunho.codigo||"", style:"margin-bottom:4px;"});
+  if(rascunho.travado) inpCodigo.disabled = true;
+  const selPacote = el("select",null,[el("option",{value:""},["Pacote…"])]);
   popularSelectPacotesAgrupado(selPacote);
-  if(rascunho.pacoteId) selPacote.value = rascunho.pacoteId;
-  const selServico = el("select",null,[]);
+  selPacote.value = rascunho.pacoteId || "";
+  const selServico = el("select",null,[el("option",{value:""},["Serviço…"])]);
   function popularServicos(){
     selServico.innerHTML = "";
+    selServico.appendChild(el("option",{value:""},["Serviço…"]));
     servicosDoPacote(selPacote.value).forEach(s => selServico.appendChild(el("option",{value:s},[s])));
-    if(rascunho.servico && [...selServico.options].some(o=>o.value===rascunho.servico)) selServico.value = rascunho.servico;
+    selServico.value = (rascunho.servico && [...selServico.options].some(o=>o.value===rascunho.servico)) ? rascunho.servico : "";
   }
   popularServicos();
   rascunho.pacoteId = selPacote.value;
   rascunho.servico = selServico.value;
   selPacote.addEventListener("change", () => { rascunho.pacoteId = selPacote.value; popularServicos(); rascunho.servico = selServico.value; });
   selServico.addEventListener("change", () => { rascunho.servico = selServico.value; });
+
+  function remover(){
+    rascunhosMapeamentoMedicao = rascunhosMapeamentoMedicao.filter(r=>r!==rascunho);
+    renderizarMapeamentoMedicao();
+  }
   function confirmar(){
     const codigo = normTexto(inpCodigo.value).toUpperCase();
-    if(!codigo) return; // sem código ainda — deixa a linha aberta
+    if(!codigo){ mostrarToast("Informe o código do UAU."); return; }
     if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
     if(!rascunho.pacoteId || !rascunho.servico){ mostrarToast("Escolha o pacote e o serviço antes de confirmar o código."); return; }
     cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: rascunho.pacoteId, servico: rascunho.servico });
     salvarConfig();
-    novaLinhaMapeamentoMedicao = null;
-    renderizarMapeamentoMedicao();
+    remover();
+    // se essa colagem tinha itens desse código esperando (ver processarColagemMedicaoUau), já
+    // libera eles agora, sem precisar colar de novo.
+    if(ultimaTabelaColadaPendente){
+      const { novos, atualizados } = aplicarItensDaTabela(ultimaTabelaColadaPendente);
+      if(novos || atualizados){ salvarMedicaoUau(); renderizarMedicaoUau(); }
+    }
     mostrarToast(`"${codigo}" mapeado.`);
   }
-  inpCodigo.addEventListener("keydown", e => { if(e.key === "Enter") confirmar(); });
-  inpCodigo.addEventListener("blur", confirmar);
-  return el("div",{class:"linha-servico"},[
-    el("div",{class:"info"},[inpCodigo, el("div",{style:"display:flex;gap:6px;"},[selPacote, selServico])]),
-    el("button",{class:"btn secundario pequeno", onclick:()=>{ novaLinhaMapeamentoMedicao = null; renderizarMapeamentoMedicao(); }},["Cancelar"])
+  const linhaBotoes = el("div",{style:"display:flex;flex-direction:column;gap:4px;"},[
+    el("button",{class:"btn pequeno", onclick:confirmar},["Vincular"]),
+    el("button",{class:"btn secundario pequeno", onclick:remover},[rascunho.travado ? "Pular" : "Cancelar"])
   ]);
+  const info = [];
+  if(rascunho.descricao) info.push(el("div",{class:"sub",style:"margin-bottom:4px;"},[`Descrição do UAU: "${rascunho.descricao}"`]));
+  info.push(inpCodigo, el("div",{style:"display:flex;gap:6px;"},[selPacote, selServico]));
+  return el("div",{class:"linha-servico"},[el("div",{class:"info"},info), linhaBotoes]);
 }
 
 function renderizarMapeamentoMedicao(){
   const area = document.getElementById("listaMapeamentoMedicao");
   if(!area) return;
   area.innerHTML = "";
-  if(cfg.mapeamentosMedicao.length === 0 && !novaLinhaMapeamentoMedicao){
+  if(cfg.mapeamentosMedicao.length === 0 && rascunhosMapeamentoMedicao.length === 0){
     area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
     return;
   }
@@ -4685,24 +4704,23 @@ function renderizarMapeamentoMedicao(){
     area.appendChild(el("div",{class:"rotulo-categoria"},["Pacote excluído"]));
     [...porPacote.values()].flat().sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
   }
-  if(novaLinhaMapeamentoMedicao){
+  if(rascunhosMapeamentoMedicao.length){
     area.appendChild(el("div",{class:"rotulo-categoria"},["Novo"]));
-    area.appendChild(linhaNovaMapeamentoMedicao());
+    rascunhosMapeamentoMedicao.forEach(r => area.appendChild(linhaRascunhoMapeamento(r)));
   }
 }
 document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", () => {
-  if(novaLinhaMapeamentoMedicao) return; // já tem uma linha em edição
-  novaLinhaMapeamentoMedicao = {};
+  rascunhosMapeamentoMedicao.push({ codigo:"", travado:false, pacoteId:null, servico:null, descricao:null });
   renderizarMapeamentoMedicao();
 });
 
 /* ===================== Conferência de Medição (UAU) =====================
    Ela cola aqui a tabela Casa × Serviço copiada do UAU/Excel (formato: 1ª coluna = casa tipo
    "QD16LT12", demais colunas = códigos de serviço tipo "S00296", células = valor medido). O app:
-   1) reconhece os códigos de serviço já mapeados (cfg.mapeamentosMedicao) pro pacote/serviço do FVS;
+   1) reconhece os códigos de serviço já mapeados (cfg.mapeamentosMedicao) pro pacote/serviço da FVS;
    2) pra código novo, pede um mapeamento rápido (reaproveita criarSeletorPacoteServico, o mesmo
       seletor usado em Pendências) — fica salvo pra próxima colagem não perguntar de novo;
-   3) cruza cada casa/serviço medido com o que o FVS já marcou como concluído (regrasConcluidas) —
+   3) cruza cada casa/serviço medido com o que a FVS já marcou como concluído (regrasConcluidas) —
       usando só os números de quadra+lote extraídos da casa, já que o formato de "casa" no MOBUSS
       não necessariamente é escrito igual ao do UAU (ex.: "16-12" vs "QD16LT12").
    A última tabela colada fica salva (obras/<obraId>/medicaoUau), compartilhada com o time — não
@@ -4711,7 +4729,7 @@ document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", ()
 // SEGUNDO grupo de dígitos, "12") quanto de como o MOBUSS/FVS já guarda "casa" (só um número, tipo
 // "12", sem quadra — ver construirIndice(), que já indexa só por casa+sublocal, nunca por quadra).
 // Achado real testando com dados simulados: comparar exigindo quadra+lote juntos nunca dava certo,
-// porque o lado do FVS nunca tem a quadra dentro do valor de "casa" pra começo de conversa.
+// porque o lado da FVS nunca tem a quadra dentro do valor de "casa" pra começo de conversa.
 function extrairLote(casaTexto){
   const nums = String(casaTexto||"").match(/\d+/g);
   if(!nums || nums.length === 0) return null;
@@ -4771,75 +4789,60 @@ function sugerirPacoteServico(descricao){
   return melhor;
 }
 
-function abrirModalMapearCodigosMedicao(codigos, descricoes, aoConcluir){
-  if(codigos.length === 0){ aoConcluir(); return; }
-  const [codigo, ...resto] = codigos;
-  const descricao = (descricoes||{})[codigo];
-  const sugestao = sugerirPacoteServico(descricao);
-  const { pacoteWrap, servicoWrap, resolverPacoteEServico } = criarSeletorPacoteServico(sugestao);
-  const infoParagrafo = [`Esse código ainda não está vinculado a nenhum pacote/serviço do FVS. A que ele corresponde? (${resto.length} código(s) restante(s) depois deste)`];
-  if(descricao) infoParagrafo.push(el("br"), el("span",{style:"color:var(--cinza-700);"},[`Descrição do UAU: "${descricao}"`]));
-  if(sugestao) infoParagrafo.push(el("br"), el("span",{style:"color:var(--vinho);font-weight:600;"},["Já deixei uma sugestão pré-selecionada abaixo — confira antes de confirmar."]));
-  const overlay = el("div",{class:"modal-overlay"},[
-    el("div",{class:"modal-caixa"},[
-      el("h4",null,[`Novo código de medição do UAU: "${codigo}"`]),
-      el("p",null,infoParagrafo),
-      pacoteWrap, servicoWrap,
-      el("div",{class:"modal-acoes"},[
-        el("button",{class:"btn secundario pequeno", onclick:()=>{ fecharModal(overlay); abrirModalMapearCodigosMedicao(resto, descricoes, aoConcluir); }},["Pular (ignorar este código)"]),
-        el("button",{class:"btn pequeno", onclick:()=>{
-          const resultado = resolverPacoteEServico();
-          if(!resultado) return;
-          cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: resultado.pacoteId, servico: resultado.servico });
-          fecharModal(overlay);
-          abrirModalMapearCodigosMedicao(resto, descricoes, aoConcluir);
-        }},["Vincular e continuar"])
-      ])
-    ])
-  ]);
-  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
-  document.addEventListener("keydown", overlay._onKeydown);
-  document.body.appendChild(overlay);
-}
-
 // chave estável por casa+código — cada colagem nova ATUALIZA o valor medido do item (se já existia),
 // preservando pago/fornecedor/data já preenchidos; nunca perde o que já foi registrado antes. Isso é
 // o que permite colar vários espelhos de medição diferentes, um de cada vez, sem um apagar o outro.
 function chaveMedicaoItem(casa, codigo){ return normTexto(casa).toUpperCase()+"__"+codigo; }
 
+// Aplica os itens de uma tabela já colada em medicaoItens — só os códigos JÁ MAPEADOS entram; os
+// que ainda não têm pacote/serviço ficam de fora até ela resolver o rascunho correspondente (ver
+// linhaRascunhoMapeamento), que reaplica essa mesma tabela na hora de confirmar, sem precisar colar
+// de novo.
+function aplicarItensDaTabela(tabela){
+  let novos = 0, atualizados = 0;
+  tabela.linhas.forEach(linha => {
+    tabela.codigos.forEach((codigo, i) => {
+      if(!cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)) return;
+      const bruto = (linha.valores[i]||"").trim();
+      if(!bruto || bruto === "-") return;
+      const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
+      if(!valor) return;
+      const chave = chaveMedicaoItem(linha.casa, codigo);
+      const atual = medicaoItens[chave];
+      medicaoItens[chave] = {
+        casa: linha.casa, codigo, valor,
+        pago: atual ? atual.pago : false,
+        fornecedorPago: atual ? atual.fornecedorPago : "",
+        dataPagamento: atual ? atual.dataPagamento : null,
+        atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
+      };
+      if(atual) atualizados++; else novos++;
+    });
+  });
+  return { novos, atualizados };
+}
+
+let ultimaTabelaColadaPendente = null; // guarda a última colagem — reaplicada quando um rascunho de código é confirmado
 async function processarColagemMedicaoUau(){
   const texto = document.getElementById("colaMedicaoUau").value;
   if(!texto.trim()){ mostrarToast("Cole a tabela copiada do UAU/Excel antes de processar."); return; }
   const tabela = parseTabelaColada(texto);
   if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
+  ultimaTabelaColadaPendente = tabela;
   const faltando = codigosNaoMapeados(tabela.codigos);
-  abrirModalMapearCodigosMedicao(faltando, tabela.descricoes, async () => {
-    await salvarConfig(); // persiste os mapeamentos de código novos (cfg.mapeamentosMedicao)
-    let novos = 0, atualizados = 0;
-    tabela.linhas.forEach(linha => {
-      tabela.codigos.forEach((codigo, i) => {
-        const bruto = (linha.valores[i]||"").trim();
-        if(!bruto || bruto === "-") return;
-        const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
-        if(!valor) return;
-        const chave = chaveMedicaoItem(linha.casa, codigo);
-        const atual = medicaoItens[chave];
-        medicaoItens[chave] = {
-          casa: linha.casa, codigo, valor,
-          pago: atual ? atual.pago : false,
-          fornecedorPago: atual ? atual.fornecedorPago : "",
-          dataPagamento: atual ? atual.dataPagamento : null,
-          atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
-        };
-        if(atual) atualizados++; else novos++;
-      });
-    });
-    await salvarMedicaoUau();
-    document.getElementById("colaMedicaoUau").value = "";
-    renderizarMapeamentoMedicao();
-    renderizarMedicaoUau();
-    mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).`);
+  faltando.forEach(codigo => {
+    if(rascunhosMapeamentoMedicao.some(r=>r.codigo===codigo)) return; // já tem rascunho pendente pra esse código
+    const descricao = tabela.descricoes[codigo];
+    const sugestao = sugerirPacoteServico(descricao);
+    rascunhosMapeamentoMedicao.push({ codigo, travado:true, pacoteId: sugestao?sugestao.pacoteId:null, servico: sugestao?sugestao.servico:null, descricao });
   });
+  const { novos, atualizados } = aplicarItensDaTabela(tabela);
+  await salvarMedicaoUau();
+  document.getElementById("colaMedicaoUau").value = "";
+  renderizarMapeamentoMedicao();
+  renderizarMedicaoUau();
+  const avisoNovosCodigos = faltando.length ? ` ${faltando.length} código(s) novo(s) — mapeie ali embaixo em "Análise por item de contrato".` : "";
+  mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
 }
 
 let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, pago, fornecedorPago, dataPagamento, atualizadoEm, atualizadoPor} }
