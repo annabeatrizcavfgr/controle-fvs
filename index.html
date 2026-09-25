@@ -1218,7 +1218,8 @@ let cfg = {
   knownSublocais: [...SUBLOCAIS_SEED],
   versoes: [],             // {id, data (ISO), rotulo, chaves:[...]} — snapshots arquivados, do mais antigo pro mais recente
   statusServico: {},        // { [chaveRegra]: {previsionLancado, previsionData, mesPagamento} } — ver chaveRegra()
-  mapeamentosMedicao: []    // {id, codigo (ex.: "S00296"), pacoteId, servico} — ver Conferência de Medição (UAU)
+  mapeamentosMedicao: [],   // {id, codigo (ex.: "S00296"), pacoteId, servico} — ver Conferência de Medição (UAU)
+  descricoesUau: {}         // { [codigo]: descrição do item de contrato, ex.: "S00296": "(FRISO NEGATIVO)..." } — guardada de qualquer colagem que traga a linha de descrição, mesmo antes do código ser mapeado
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -1260,6 +1261,7 @@ async function carregarConfig(){
       cfg.versoes = parsed.versoes || [];
       cfg.statusServico = parsed.statusServico || {};
       cfg.mapeamentosMedicao = parsed.mapeamentosMedicao || [];
+      cfg.descricoesUau = parsed.descricoesUau || {};
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
       const nomesCorrigidos = corrigirPacotesOrfaos();
@@ -4604,11 +4606,13 @@ function linhaMapeamentoMedicao(m){
     renderizarMapeamentoMedicao(); // muda de grupo
   });
   selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
+  const descricao = cfg.descricoesUau[m.codigo];
   return el("div",{class:"linha-servico"},[
     el("div",{class:"info"},[
       el("div",{class:"servico-nome"},[m.codigo]),
+      descricao ? el("div",{class:"sub",style:"margin-top:2px;"},[descricao]) : null,
       el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
-    ]),
+    ].filter(Boolean)),
     el("button",{class:"btn perigo pequeno", onclick:()=>{
       if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
       cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
@@ -4773,19 +4777,49 @@ function normalizarPalavras(texto){
   return normTexto(texto).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
     .split(/[^A-Z0-9]+/).filter(w=>w.length>2);
 }
+// Pondera cada palavra pela raridade dela entre os pares pacote/serviço já cadastrados (tipo TF-IDF
+// simplificado) — palavra comum (ex.: "REVESTIMENTO", "PAREDE", que aparece em muitos serviços)
+// pesa pouco; palavra rara (ex.: um material ou local específico) pesa muito mais. Sem isso, a
+// sugestão errava direto: um código de "FRISO EM REBOCO DE FACHADA" batia com "PINTURA EXTERNA" só
+// porque as duas frases têm a palavra "EXTERNO"/"FACHADA" em comum, que sozinha não diz muita coisa.
+function calcularIdfMapeamentos(){
+  const entradas = cfg.mapeamentos.filter(m=>m.servico).map(m => {
+    const pac = cfg.pacotes.find(p=>p.id===m.pacoteId);
+    return { m, palavras: new Set(normalizarPalavras(m.servico+" "+(pac?pac.nome:""))) };
+  });
+  const df = new Map();
+  entradas.forEach(({palavras}) => palavras.forEach(w => df.set(w, (df.get(w)||0)+1)));
+  const N = entradas.length || 1;
+  const idf = new Map();
+  df.forEach((count, w) => idf.set(w, Math.log((N+1)/(count+1)) + 1));
+  return { entradas, idf };
+}
 function sugerirPacoteServico(descricao){
   if(!descricao) return null;
   const palavrasDesc = new Set(normalizarPalavras(descricao));
   if(palavrasDesc.size===0) return null;
-  let melhor = null, melhorScore = 0;
-  cfg.mapeamentos.forEach(m => {
-    if(!m.servico) return;
-    const pac = cfg.pacotes.find(p=>p.id===m.pacoteId);
-    const palavrasAlvo = normalizarPalavras(m.servico+" "+(pac?pac.nome:""));
-    let score = 0;
-    palavrasAlvo.forEach(w => { if(palavrasDesc.has(w)) score++; });
-    if(score > melhorScore){ melhorScore = score; melhor = { pacoteId: m.pacoteId, servico: m.servico }; }
-  });
+  const { entradas, idf } = calcularIdfMapeamentos();
+  const pontuados = entradas.map(({m, palavras}) => {
+    let score = 0, contagem = 0;
+    palavras.forEach(w => { if(palavrasDesc.has(w)){ score += (idf.get(w)||1); contagem++; } });
+    return { pacoteId: m.pacoteId, servico: m.servico, contagem, score: score / Math.sqrt(palavras.size || 1) };
+  }).sort((a,b)=>b.score-a.score);
+  const melhorItem = pontuados[0];
+  if(!melhorItem || melhorItem.score <= 0) return null;
+  const melhor = { pacoteId: melhorItem.pacoteId, servico: melhorItem.servico };
+  const melhorScore = melhorItem.score, melhorContagem = melhorItem.contagem;
+  // só compara com o "segundo colocado" de um PACOTE DIFERENTE — dois serviços quase idênticos do
+  // MESMO pacote (ex.: "...- CASA" vs "...- ESCADA") não contam como ambíguo aqui, ela ainda escolhe
+  // o serviço certo depois; o que quero evitar é confundir pacotes diferentes entre si.
+  const segundoDeOutroPacote = pontuados.find(p => p.pacoteId !== melhorItem.pacoteId);
+  const segundoScore = segundoDeOutroPacote ? segundoDeOutroPacote.score : 0;
+  // só sugere quando o melhor resultado é claramente bom, tem PELO MENOS 2 palavras distintivas em
+  // comum (uma palavra só em comum é fácil de ser coincidência, ver achado real: "EXTERNO" batendo
+  // com "PINTURA EXTERNA" numa descrição sobre reboco de fachada) E é claramente melhor que o melhor
+  // candidato de outro pacote — prefiro não sugerir nada a sugerir algo fraco/ambíguo sem ela reparar.
+  if(melhorContagem < 2) return null;
+  if(melhorScore < 2.5) return null;
+  if(segundoScore > 0 && melhorScore < segundoScore * 1.3) return null;
   return melhor;
 }
 
@@ -4829,10 +4863,17 @@ async function processarColagemMedicaoUau(){
   const tabela = parseTabelaColada(texto);
   if(!tabela){ mostrarToast('Não consegui reconhecer a tabela colada — confirme que copiou incluindo a linha de códigos (ex.: "S00296") e a coluna de casa (ex.: "QD16LT12").'); return; }
   ultimaTabelaColadaPendente = tabela;
+  // guarda a descrição de cada código (mesmo dos já mapeados) — fica disponível na tabela de
+  // resultados e em colagens futuras que não tragam a linha de descrição de novo.
+  let novasDescricoes = false;
+  Object.entries(tabela.descricoes).forEach(([codigo, desc]) => {
+    if(cfg.descricoesUau[codigo] !== desc){ cfg.descricoesUau[codigo] = desc; novasDescricoes = true; }
+  });
+  if(novasDescricoes) await salvarConfig();
   const faltando = codigosNaoMapeados(tabela.codigos);
   faltando.forEach(codigo => {
     if(rascunhosMapeamentoMedicao.some(r=>r.codigo===codigo)) return; // já tem rascunho pendente pra esse código
-    const descricao = tabela.descricoes[codigo];
+    const descricao = tabela.descricoes[codigo] || cfg.descricoesUau[codigo];
     const sugestao = sugerirPacoteServico(descricao);
     rascunhosMapeamentoMedicao.push({ codigo, travado:true, pacoteId: sugestao?sugestao.pacoteId:null, servico: sugestao?sugestao.servico:null, descricao });
   });
@@ -4906,7 +4947,9 @@ function renderizarMedicaoUau(){
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
   const filtrados = !busca ? enriquecidos : enriquecidos.filter(it => {
     const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+    const descricao = cfg.descricoesUau[it.codigo] || "";
     return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
+      descricao.toLowerCase().includes(busca) ||
       (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
       (pacote && pacote.nome.toLowerCase().includes(busca));
   });
@@ -4922,7 +4965,7 @@ function renderizarMedicaoUau(){
   area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:4px;"},[
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
-        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
+        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
         el("th",null,["Situação FVS"]),el("th",null,["Pago?"]),el("th",null,["Fornecedor pago"]),el("th",null,["Data pagamento"])
       ])]),
       el("tbody",null, mostrar.map(item => {
@@ -4941,6 +4984,7 @@ function renderizarMedicaoUau(){
         inpData.addEventListener("change", salvarItem);
         return el("tr",{class: item.pago?"linha-ok":""},[
           el("td",null,[item.casa]), el("td",null,[item.codigo]),
+          el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
           el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
           el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"])]),
