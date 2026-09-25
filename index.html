@@ -5003,11 +5003,15 @@ function formulariosFaltandoDoItem(mapa){
 // do filtro quanto pra decidir se uma linha passa nele.
 function valorColunaMedicao(it, coluna){
   switch(coluna){
+    case "casa": return it.casa || "—";
+    case "codigo": return it.codigo || "—";
+    case "descricao": return cfg.descricoesUau[it.codigo] || "—";
     case "servico": {
       if(!it.mapa) return "Não vinculado";
       const pacote = cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
       return (pacote?pacote.nome:"?")+" / "+it.mapa.servico;
     }
+    case "valor": return it.valor.toLocaleString("pt-BR",{minimumFractionDigits:2});
     case "situacao": return it.comFvs ? "Com FVS" : "Sem FVS";
     case "contrato": return it.contrato || "—";
     case "boletim": return it.boletim || "—";
@@ -5015,7 +5019,7 @@ function valorColunaMedicao(it, coluna){
     case "empresa": return it.empresa || "—";
   }
 }
-const COLUNAS_FILTRAVEIS_MEDICAO = ["servico","situacao","contrato","boletim","mes","empresa"];
+const COLUNAS_FILTRAVEIS_MEDICAO = ["casa","codigo","descricao","servico","valor","situacao","contrato","boletim","mes","empresa"];
 let filtrosColunaMedicao = {}; // { [coluna]: Set(valores visíveis) } — coluna ausente = mostra tudo (igual ao AutoFilter do Excel)
 let colunasFiltroAbertas = new Set(); // quais dropdowns de coluna estão abertos agora
 
@@ -5105,7 +5109,7 @@ function renderizarMedicaoUau(){
       wrapContratos.appendChild(el("div",{class:"chip", style:`justify-content:space-between;padding:6px 8px 6px 12px;gap:10px;${corFundo}`},[
         el("b",null,[`Contrato ${c} (${qtd})`]),
         el("div",{style:"display:flex;gap:6px;flex-shrink:0;"},[
-          el("button",{class:"btn secundario pequeno", title: emEspera ? "Retomar contrato" : "Colocar contrato em espera", onclick:()=>{
+          el("button",{onclick:()=>{
             if(emEspera) contratosEmEspera.delete(c); else contratosEmEspera.add(c);
             salvarMedicaoUau();
             renderizarMedicaoUau();
@@ -5207,8 +5211,8 @@ function renderizarMedicaoUau(){
   area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:4px;"},[
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
-        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),
-        celulaHeaderFiltro("servico","Pacote/Serviço"), el("th",null,["Valor"]),
+        celulaHeaderFiltro("casa","Casa"), celulaHeaderFiltro("codigo","Código"), celulaHeaderFiltro("descricao","Descrição UAU"),
+        celulaHeaderFiltro("servico","Pacote/Serviço"), celulaHeaderFiltro("valor","Valor"),
         celulaHeaderFiltro("situacao","Situação FVS"), celulaHeaderFiltro("contrato","Contrato"),
         celulaHeaderFiltro("boletim","Boletim"), celulaHeaderFiltro("mes","Mês"), celulaHeaderFiltro("empresa","Empresa"),
         el("th",null,[""])
