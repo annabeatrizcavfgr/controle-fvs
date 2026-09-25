@@ -4856,7 +4856,6 @@ function aplicarItensDaTabela(tabela){
         pago: atual ? atual.pago : false,
         fornecedorPago: atual ? atual.fornecedorPago : "",
         dataPagamento: atual ? atual.dataPagamento : null,
-        emEspera: atual ? !!atual.emEspera : false,
         atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
       };
       if(atual) atualizados++; else novos++;
@@ -4900,15 +4899,18 @@ async function processarColagemMedicaoUau(){
   mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
 }
 
-let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, pago, fornecedorPago, dataPagamento, atualizadoEm, atualizadoPor} }
+let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, pago, fornecedorPago, dataPagamento, atualizadoEm, atualizadoPor} }
+let contratosEmEspera = new Set(); // nº de contrato inteiro posto de lado (ver botão "Colocar contrato em espera") — some da tela toda de uma vez, sem perder nada
 async function carregarMedicaoUau(){
   try{
     const snap = await db.doc("medicaoUau").get();
-    medicaoItens = snap.exists ? (snap.data().itens || {}) : {};
-  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; }
+    const dados = snap.exists ? snap.data() : {};
+    medicaoItens = dados.itens || {};
+    contratosEmEspera = new Set(dados.contratosEmEspera || []);
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; contratosEmEspera = new Set(); }
 }
 async function salvarMedicaoUau(){
-  try{ await db.doc("medicaoUau").set({ itens: medicaoItens }); }
+  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, contratosEmEspera: [...contratosEmEspera] }); }
   catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
 }
 
@@ -4945,7 +4947,7 @@ function renderizarMedicaoUau(){
   meta.textContent = `${todos.length} item(ns) medido(s) no total`;
 
   const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
-  let totalOk = 0, totalPago = 0, totalEmEspera = 0;
+  let totalOk = 0, totalPago = 0;
   const enriquecidos = todos.map(item => {
     const mapa = mapaCodigo.get(item.codigo);
     const lote = extrairLote(item.casa);
@@ -4959,9 +4961,9 @@ function renderizarMedicaoUau(){
     }
     if(comFvs) totalOk++;
     if(item.pago) totalPago++;
-    if(item.emEspera) totalEmEspera++;
     return { ...item, mapa, comFvs, motivo };
   });
+  const totalEmEspera = enriquecidos.filter(it => contratosEmEspera.has(it.contrato)).length;
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
@@ -4972,7 +4974,27 @@ function renderizarMedicaoUau(){
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
   ]));
 
-  const toolbar = el("div",{class:"toolbar",style:"margin:10px 0;"});
+  // Contratos presentes nos itens carregados — cada um com um botão pra por/tirar de espera de uma
+  // vez só (ela pediu: "seria melhor ficar em espera o contrato inteiro", não item por item).
+  const contratos = [...new Set(enriquecidos.map(it=>it.contrato).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
+  if(contratos.length){
+    const wrapContratos = el("div",{style:"display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"});
+    contratos.forEach(c => {
+      const emEspera = contratosEmEspera.has(c);
+      const qtd = enriquecidos.filter(it=>it.contrato===c).length;
+      wrapContratos.appendChild(el("div",{class:"chip", style: emEspera ? "border-color:var(--amarelo);background:var(--amarelo-claro);" : ""},[
+        `Contrato ${c} (${qtd})`,
+        el("button",{onclick:()=>{
+          if(emEspera) contratosEmEspera.delete(c); else contratosEmEspera.add(c);
+          salvarMedicaoUau();
+          renderizarMedicaoUau();
+        }},[emEspera ? "▶" : "⏸"])
+      ]));
+    });
+    area.appendChild(wrapContratos);
+  }
+
+  const toolbar = el("div",{class:"toolbar",style:"margin:0 0 10px;"});
   const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
   inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
   toolbar.appendChild(inpBusca);
@@ -4981,12 +5003,20 @@ function renderizarMedicaoUau(){
   chkEmEspera.checked = mostrarEmEsperaMedicao;
   chkEmEspera.addEventListener("change", () => { mostrarEmEsperaMedicao = chkEmEspera.checked; renderizarMedicaoUau(); });
   lblEmEspera.appendChild(chkEmEspera);
-  lblEmEspera.appendChild(document.createTextNode(`Mostrar itens em espera (${totalEmEspera})`));
+  lblEmEspera.appendChild(document.createTextNode(`Mostrar contratos em espera (${totalEmEspera})`));
   toolbar.appendChild(lblEmEspera);
+  toolbar.appendChild(el("div",{class:"espaco"}));
+  toolbar.appendChild(el("button",{class:"btn perigo pequeno", onclick:()=>{
+    if(!confirm(`Excluir TODOS os ${todos.length} itens da Conferência de Medição? Isso não desfaz.`)) return;
+    medicaoItens = {};
+    contratosEmEspera = new Set();
+    salvarMedicaoUau();
+    renderizarMedicaoUau();
+  }},["Limpar tudo"]));
   area.appendChild(toolbar);
 
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
-  let filtrados = enriquecidos.filter(it => !it.emEspera || mostrarEmEsperaMedicao);
+  let filtrados = enriquecidos.filter(it => !contratosEmEspera.has(it.contrato) || mostrarEmEsperaMedicao);
   if(busca){
     filtrados = filtrados.filter(it => {
       const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
@@ -5002,7 +5032,7 @@ function renderizarMedicaoUau(){
   filtrados.sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
 
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[busca ? "Nada encontrado com essa busca." : "Nenhum item pendente — tudo que está \"em espera\" foi filtrado (marque a caixa acima pra ver)."]));
+    area.appendChild(el("div",{class:"msg-vazio"},[busca ? "Nada encontrado com essa busca." : "Nenhum item pendente — os contratos em espera estão filtrados (marque a caixa acima pra ver)."]));
     return;
   }
 
@@ -5029,22 +5059,23 @@ function renderizarMedicaoUau(){
         chkPago.addEventListener("change", () => { salvarItem(); renderizarMedicaoUau(); });
         inpFornecedor.addEventListener("change", salvarItem);
         inpData.addEventListener("change", salvarItem);
-        const btnEspera = el("button",{class:"btn secundario pequeno", title: item.emEspera ? "Voltar esse item pra lista principal" : "Tirar esse item da tela por enquanto (ex.: vai averiguar a FVS faltando) — continua salvo, só filtrado", onclick:()=>{
-          medicaoItens[item.chave] = { ...medicaoItens[item.chave], emEspera: !item.emEspera };
+        const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
+          if(!confirm(`Excluir o item "${item.casa} / ${item.codigo}"? Isso não desfaz — se ainda estiver na tabela colada, colar de novo recria ele.`)) return;
+          delete medicaoItens[item.chave];
           salvarMedicaoUau();
           renderizarMedicaoUau();
-        }},[item.emEspera ? "Retomar" : "Colocar em espera"]);
-        return el("tr",{class: item.pago?"linha-ok":(item.emEspera?"":"")},[
+        }},["Excluir"]);
+        return el("tr",{class: item.pago?"linha-ok":""},[
           el("td",null,[item.casa]), el("td",null,[item.codigo]),
           el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
           el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"]), item.emEspera ? el("span",{class:"badge info",style:"margin-left:4px;"},["Em espera"]) : null].filter(Boolean)),
+          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"])]),
           el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]), el("td",null,[item.empresa||"—"]),
           el("td",null,[chkPago]),
           el("td",null,[inpFornecedor]),
           el("td",null,[inpData]),
-          el("td",null,[btnEspera])
+          el("td",null,[btnExcluir])
         ]);
       }))
     ])
