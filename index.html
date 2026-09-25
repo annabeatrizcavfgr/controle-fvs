@@ -170,6 +170,10 @@
   .linha-servico .info{display:flex;flex-direction:column;gap:1px;}
   .linha-servico .servico-nome{font-weight:600;}
   .linha-servico .servico-fvs{color:var(--cinza-700);font-size:11px;}
+  .linha-codigo-medicao{display:flex;align-items:center;gap:10px;padding:4px 8px;border-bottom:1px solid var(--cinza-200);font-size:12.5px;}
+  .linha-codigo-medicao .codigo{font-family:Consolas,monospace;font-weight:700;font-size:11.5px;flex-shrink:0;width:64px;}
+  .linha-codigo-medicao .descricao{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cinza-700);}
+  .linha-codigo-medicao button{flex-shrink:0;}
   .sublocais-lbl{font-size:11px;color:var(--cinza-700);text-transform:uppercase;letter-spacing:.3px;}
   button.btn.destaque{background:var(--amarelo);color:#fff;box-shadow:0 0 0 3px var(--amarelo-claro);}
   button.btn.destaque:hover{background:#96700a;}
@@ -4586,7 +4590,28 @@ document.getElementById("btnExportPagamento").addEventListener("click", () => {
 // Formulário Avulso (pra FVS que nunca fecham pacote, só existem pra comprovar pagamento — ver
 // "FVS Avulsas"). `alvo` é mutado direto ({tipo, pacoteId, servico, formulario}); onChange() roda
 // depois de qualquer edição, e quem chama decide se isso já salva/re-renderiza ou só guarda rascunho.
+// São muitos códigos de orçamento — o card antigo (código + descrição em 2 linhas + 2 selects
+// sempre visíveis) deixava a lista enorme. Agora cada código é UMA linha só (código - descrição);
+// o pacote/serviço só aparece pra edição quando ela clica em "Mudar pacote", nesse item específico.
+let mapeamentosEmEdicao = new Set(); // ids de mapeamentosMedicao com o seletor de pacote/serviço aberto agora
 function linhaMapeamentoMedicao(m){
+  const descricao = cfg.descricoesUau[m.codigo];
+  const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
+    if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
+    cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
+    salvarConfig();
+    renderizarMapeamentoMedicao();
+  }},["Excluir"]);
+
+  if(!mapeamentosEmEdicao.has(m.id)){
+    return el("div",{class:"linha-codigo-medicao"},[
+      el("div",{class:"codigo"},[m.codigo]),
+      el("div",{class:"descricao", title: descricao||""},[descricao || "—"]),
+      el("button",{class:"btn secundario pequeno", onclick:()=>{ mapeamentosEmEdicao.add(m.id); renderizarMapeamentoMedicao(); }},["Mudar pacote"]),
+      btnExcluir
+    ]);
+  }
+
   const selPacote = el("select",null,[el("option",{value:""},["(pacote excluído)"])]);
   popularSelectPacotesAgrupado(selPacote);
   selPacote.value = m.pacoteId;
@@ -4603,22 +4628,18 @@ function linhaMapeamentoMedicao(m){
     popularServicos();
     m.servico = selServico.value;
     salvarConfig();
-    renderizarMapeamentoMedicao(); // muda de grupo
   });
   selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
-  const descricao = cfg.descricoesUau[m.codigo];
   return el("div",{class:"linha-servico"},[
     el("div",{class:"info"},[
       el("div",{class:"servico-nome"},[m.codigo]),
       descricao ? el("div",{class:"sub",style:"margin-top:2px;"},[descricao]) : null,
       el("div",{style:"display:flex;gap:6px;margin-top:4px;"},[selPacote, selServico])
     ].filter(Boolean)),
-    el("button",{class:"btn perigo pequeno", onclick:()=>{
-      if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
-      cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
-      salvarConfig();
-      renderizarMapeamentoMedicao();
-    }},["Excluir"])
+    el("div",{style:"display:flex;flex-direction:column;gap:4px;"},[
+      el("button",{class:"btn pequeno", onclick:()=>{ mapeamentosEmEdicao.delete(m.id); renderizarMapeamentoMedicao(); }},["Concluir"]),
+      btnExcluir
+    ])
   ]);
 }
 
