@@ -4982,9 +4982,57 @@ function formulariosFaltandoDoItem(mapa){
   return formulariosDoRotulo(mapa.pacoteId, mapa.servico).filter(Boolean);
 }
 
+// Valor de exibição/filtro de uma coluna filtrável — o mesmo texto usado tanto pra listar as opções
+// do filtro quanto pra decidir se uma linha passa nele.
+function valorColunaMedicao(it, coluna){
+  switch(coluna){
+    case "servico": {
+      if(!it.mapa) return "Não vinculado";
+      const pacote = cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+      return (pacote?pacote.nome:"?")+" / "+it.mapa.servico;
+    }
+    case "situacao": return it.comFvs ? "Com FVS" : "Sem FVS";
+    case "contrato": return it.contrato || "—";
+    case "boletim": return it.boletim || "—";
+    case "mes": return it.mesMedicao ? formatarMesAno(it.mesMedicao) : "—";
+    case "empresa": return it.empresa || "—";
+  }
+}
+const COLUNAS_FILTRAVEIS_MEDICAO = ["servico","situacao","contrato","boletim","mes","empresa"];
+let filtrosColunaMedicao = {}; // { [coluna]: Set(valores visíveis) } — coluna ausente = mostra tudo (igual ao AutoFilter do Excel)
+let colunasFiltroAbertas = new Set(); // quais dropdowns de coluna estão abertos agora
+
+function itemBateBuscaMedicao(it, busca){
+  if(!busca) return true;
+  const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+  const descricao = cfg.descricoesUau[it.codigo] || "";
+  return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
+    descricao.toLowerCase().includes(busca) ||
+    (it.contrato||"").toLowerCase().includes(busca) || (it.boletim||"").toLowerCase().includes(busca) ||
+    (it.empresa||"").toLowerCase().includes(busca) ||
+    (it.mesMedicao && formatarMesAno(it.mesMedicao).toLowerCase().includes(busca)) ||
+    (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
+    (pacote && pacote.nome.toLowerCase().includes(busca));
+}
+
+// Aplica em-espera + busca + filtros de coluna, exceto o de "ignorarColuna" — assim o dropdown de
+// cada coluna só oferece os valores que ainda fazem sentido dados os OUTROS filtros já ativos
+// (mesmo comportamento em cascata do AutoFilter do Excel).
+function itensFiltradosMedicao(enriquecidos, busca, ignorarColuna){
+  return enriquecidos.filter(it => {
+    if(!mostrarEmEsperaMedicao && contratosEmEspera.has(it.contrato)) return false;
+    if(!itemBateBuscaMedicao(it, busca)) return false;
+    for(const coluna of COLUNAS_FILTRAVEIS_MEDICAO){
+      if(coluna === ignorarColuna) continue;
+      const selecionados = filtrosColunaMedicao[coluna];
+      if(selecionados && !selecionados.has(valorColunaMedicao(it, coluna))) return false;
+    }
+    return true;
+  });
+}
+
 let buscaMedicaoUauTexto = "";
 let mostrarEmEsperaMedicao = false;
-let filtroServicoMedicaoUau = ""; // "" = todos; senão, "pacoteId__servico" — pra conferir serviço a serviço
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
@@ -5043,23 +5091,6 @@ function renderizarMedicaoUau(){
   const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim, mês ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
   inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
   toolbar.appendChild(inpBusca);
-  // Filtro por serviço — pra conferir serviço a serviço (ex.: revisar só "Mureta de medição" de
-  // uma vez), em vez de precisar digitar o nome inteiro na busca livre.
-  const servicosPresentes = new Map(); // "pacoteId__servico" -> rótulo "Pacote / Serviço"
-  enriquecidos.forEach(it => {
-    if(!it.mapa) return;
-    const chave = it.mapa.pacoteId+"__"+it.mapa.servico;
-    if(servicosPresentes.has(chave)) return;
-    const pacote = cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
-    servicosPresentes.set(chave, (pacote?pacote.nome:"?")+" / "+it.mapa.servico);
-  });
-  const selServico = el("select",{style:"max-width:280px;"},[el("option",{value:""},["Todos os serviços…"])]);
-  [...servicosPresentes.entries()].sort((a,b)=>a[1].localeCompare(b[1],"pt-BR")).forEach(([chave,rotulo]) => {
-    selServico.appendChild(el("option",{value:chave},[rotulo]));
-  });
-  selServico.value = servicosPresentes.has(filtroServicoMedicaoUau) ? filtroServicoMedicaoUau : "";
-  selServico.addEventListener("change", () => { filtroServicoMedicaoUau = selServico.value; renderizarMedicaoUau(); });
-  toolbar.appendChild(selServico);
   const lblEmEspera = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
   const chkEmEspera = el("input",{type:"checkbox"});
   chkEmEspera.checked = mostrarEmEsperaMedicao;
@@ -5078,28 +5109,55 @@ function renderizarMedicaoUau(){
   area.appendChild(toolbar);
 
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
-  let filtrados = enriquecidos.filter(it => !contratosEmEspera.has(it.contrato) || mostrarEmEsperaMedicao);
-  if(filtroServicoMedicaoUau){
-    filtrados = filtrados.filter(it => it.mapa && (it.mapa.pacoteId+"__"+it.mapa.servico) === filtroServicoMedicaoUau);
-  }
-  if(busca){
-    filtrados = filtrados.filter(it => {
-      const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
-      const descricao = cfg.descricoesUau[it.codigo] || "";
-      return it.casa.toLowerCase().includes(busca) || it.codigo.toLowerCase().includes(busca) ||
-        descricao.toLowerCase().includes(busca) ||
-        (it.contrato||"").toLowerCase().includes(busca) || (it.boletim||"").toLowerCase().includes(busca) ||
-        (it.empresa||"").toLowerCase().includes(busca) ||
-        (it.mesMedicao && formatarMesAno(it.mesMedicao).toLowerCase().includes(busca)) ||
-        (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
-        (pacote && pacote.nome.toLowerCase().includes(busca));
-    });
-  }
-  filtrados.sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
+  const filtrados = itensFiltradosMedicao(enriquecidos, busca, null)
+    .sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
 
+  const algumFiltroColunaAtivo = COLUNAS_FILTRAVEIS_MEDICAO.some(c => filtrosColunaMedicao[c]);
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[busca ? "Nada encontrado com essa busca." : "Nenhum item pendente — os contratos em espera estão filtrados (marque a caixa acima pra ver)."]));
+    area.appendChild(el("div",{class:"msg-vazio"},[(busca||algumFiltroColunaAtivo) ? "Nada encontrado com essa busca/filtro." : "Nenhum item pendente — os contratos em espera estão filtrados (marque a caixa acima pra ver)."]));
     return;
+  }
+
+  // Cabeçalho de coluna com filtro tipo Excel: clica na setinha, marca/desmarca os valores que quer
+  // ver. Cada dropdown só lista os valores que ainda sobram dado os OUTROS filtros já ativos (não
+  // conta o filtro da própria coluna), pra ficar em cascata como no Excel.
+  function celulaHeaderFiltro(coluna, rotulo){
+    const valores = [...new Set(itensFiltradosMedicao(enriquecidos, busca, coluna).map(it=>valorColunaMedicao(it,coluna)))]
+      .sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
+    const selecionados = filtrosColunaMedicao[coluna];
+    const marcadosAtuais = new Set(selecionados ? [...selecionados].filter(v=>valores.includes(v)) : valores);
+    const ativo = !!selecionados;
+    const detalhes = el("details",{style:"display:inline-block;position:relative;margin-left:5px;vertical-align:middle;"});
+    if(colunasFiltroAbertas.has(coluna)) detalhes.setAttribute("open","");
+    detalhes.addEventListener("toggle", () => {
+      if(detalhes.open) colunasFiltroAbertas.add(coluna); else colunasFiltroAbertas.delete(coluna);
+    });
+    const summary = el("summary",{style:`cursor:pointer;list-style:none;font-weight:700;color:${ativo?"var(--vinho)":"var(--cinza-500)"};`},["▾"]);
+    const popover = el("div",{style:"position:absolute;z-index:30;background:#fff;border:1px solid var(--cinza-300);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.15);padding:8px;min-width:190px;max-height:230px;overflow:auto;top:100%;left:0;font-weight:normal;font-size:12.5px;text-transform:none;letter-spacing:normal;color:var(--cinza-800);"});
+    const chkTodos = el("input",{type:"checkbox"});
+    chkTodos.checked = marcadosAtuais.size === valores.length;
+    chkTodos.addEventListener("change", () => {
+      if(chkTodos.checked) delete filtrosColunaMedicao[coluna]; else filtrosColunaMedicao[coluna] = new Set();
+      renderizarMedicaoUau();
+    });
+    popover.appendChild(el("label",{style:"display:flex;gap:6px;align-items:center;font-weight:600;border-bottom:1px solid var(--cinza-200);padding-bottom:5px;margin-bottom:5px;"},[chkTodos, "Selecionar todos"]));
+    if(valores.length === 0){
+      popover.appendChild(el("div",{class:"sub",style:"margin:0;"},["Nenhum valor pra filtrar."]));
+    }
+    valores.forEach(valor => {
+      const chk = el("input",{type:"checkbox"});
+      chk.checked = marcadosAtuais.has(valor);
+      chk.addEventListener("change", () => {
+        const nova = new Set(marcadosAtuais);
+        if(chk.checked) nova.add(valor); else nova.delete(valor);
+        if(nova.size === valores.length) delete filtrosColunaMedicao[coluna]; else filtrosColunaMedicao[coluna] = nova;
+        renderizarMedicaoUau();
+      });
+      popover.appendChild(el("label",{style:"display:flex;gap:6px;align-items:center;padding:2px 0;"},[chk, valor]));
+    });
+    detalhes.appendChild(summary);
+    detalhes.appendChild(popover);
+    return el("th",null,[rotulo, detalhes]);
   }
 
   const LIMITE = 300;
@@ -5107,8 +5165,11 @@ function renderizarMedicaoUau(){
   area.appendChild(el("div",{class:"tabela-wrap",style:"margin-top:4px;"},[
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
-        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
-        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Mês"]),el("th",null,["Empresa"]),el("th",null,[""])
+        el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),
+        celulaHeaderFiltro("servico","Pacote/Serviço"), el("th",null,["Valor"]),
+        celulaHeaderFiltro("situacao","Situação FVS"), celulaHeaderFiltro("contrato","Contrato"),
+        celulaHeaderFiltro("boletim","Boletim"), celulaHeaderFiltro("mes","Mês"), celulaHeaderFiltro("empresa","Empresa"),
+        el("th",null,[""])
       ])]),
       el("tbody",null, mostrar.map(item => {
         const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
