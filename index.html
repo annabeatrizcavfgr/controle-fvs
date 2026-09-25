@@ -4688,25 +4688,40 @@ function renderizarMapeamentoMedicao(){
     area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
     return;
   }
-  // agrupado por pacote, na mesma ordem vagão→pacote do Cadastro; um grupo à parte pro que ficou
-  // órfão (pacote excluído depois de mapeado).
+  // Agrupado Vagão > Pacote > Serviço > códigos (na mesma ordem vagão→pacote do Cadastro). São
+  // muitos códigos de orçamento (um por item do UAU) — agrupar só por pacote deixava a lista comprida
+  // demais pra bater o olho; com o serviço no meio, o caminho fica "este código é deste serviço,
+  // deste pacote, deste vagão", em vez de uma lista só de códigos misturados dentro do pacote.
+  function renderizarItensAgrupadosPorServico(itens){
+    const porServico = new Map();
+    itens.forEach(m => {
+      const chave = m.servico || "(sem serviço)";
+      if(!porServico.has(chave)) porServico.set(chave, []);
+      porServico.get(chave).push(m);
+    });
+    [...porServico.entries()].sort((a,b)=>a[0].localeCompare(b[0],"pt-BR")).forEach(([servico, ms]) => {
+      area.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--vinho);margin:8px 0 4px 16px;"},[servico]));
+      ms.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+    });
+  }
   const porPacote = new Map();
   cfg.mapeamentosMedicao.forEach(m => {
     if(!porPacote.has(m.pacoteId)) porPacote.set(m.pacoteId, []);
     porPacote.get(m.pacoteId).push(m);
   });
   vagoesComPacotesEmOrdem().forEach(vagao => {
-    pacotesDoVagaoEmOrdem(vagao.id).forEach(pac => {
-      const itens = porPacote.get(pac.id);
-      if(!itens) return;
-      area.appendChild(el("div",{class:"rotulo-categoria"},[pac.nome + (pac.semPrevision ? " (sem avanço)" : "")]));
-      itens.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+    const pacotesComItens = pacotesDoVagaoEmOrdem(vagao.id).filter(pac=>porPacote.has(pac.id));
+    if(pacotesComItens.length === 0) return;
+    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corPorTexto(vagao.nome)};`},[vagao.nome]));
+    pacotesComItens.forEach(pac => {
+      area.appendChild(el("div",{style:"font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--cinza-700);margin:12px 0 4px 6px;"},[pac.nome + (pac.semPrevision ? " (sem avanço)" : "")]));
+      renderizarItensAgrupadosPorServico(porPacote.get(pac.id));
       porPacote.delete(pac.id);
     });
   });
   if(porPacote.size){
     area.appendChild(el("div",{class:"rotulo-categoria"},["Pacote excluído"]));
-    [...porPacote.values()].flat().sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+    renderizarItensAgrupadosPorServico([...porPacote.values()].flat());
   }
   if(rascunhosMapeamentoMedicao.length){
     area.appendChild(el("div",{class:"rotulo-categoria"},["Novo"]));
@@ -4953,16 +4968,18 @@ async function processarColagemMedicaoUau(){
 // "empresa" e o boletim de medição É o evento de pagamento, não precisa mais confirmar isso à mão).
 let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, mesMedicao, atualizadoEm, atualizadoPor} }
 let contratosEmEspera = new Set(); // nº de contrato inteiro posto de lado (ver botão "Colocar contrato em espera") — some da tela toda de uma vez, sem perder nada
+let contratosValidados = new Set(); // nº de contrato inteiro já conferido/aprovado por inteiro — ela pediu um lugar pra marcar isso
 async function carregarMedicaoUau(){
   try{
     const snap = await db.doc("medicaoUau").get();
     const dados = snap.exists ? snap.data() : {};
     medicaoItens = dados.itens || {};
     contratosEmEspera = new Set(dados.contratosEmEspera || []);
-  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; contratosEmEspera = new Set(); }
+    contratosValidados = new Set(dados.contratosValidados || []);
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; contratosEmEspera = new Set(); contratosValidados = new Set(); }
 }
 async function salvarMedicaoUau(){
-  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, contratosEmEspera: [...contratosEmEspera] }); }
+  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, contratosEmEspera: [...contratosEmEspera], contratosValidados: [...contratosValidados] }); }
   catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
 }
 
@@ -5015,12 +5032,13 @@ function itemBateBuscaMedicao(it, busca){
     (pacote && pacote.nome.toLowerCase().includes(busca));
 }
 
-// Aplica em-espera + busca + filtros de coluna, exceto o de "ignorarColuna" — assim o dropdown de
-// cada coluna só oferece os valores que ainda fazem sentido dados os OUTROS filtros já ativos
-// (mesmo comportamento em cascata do AutoFilter do Excel).
+// Aplica em-espera + validado + busca + filtros de coluna, exceto o de "ignorarColuna" — assim o
+// dropdown de cada coluna só oferece os valores que ainda fazem sentido dados os OUTROS filtros já
+// ativos (mesmo comportamento em cascata do AutoFilter do Excel).
 function itensFiltradosMedicao(enriquecidos, busca, ignorarColuna){
   return enriquecidos.filter(it => {
     if(!mostrarEmEsperaMedicao && contratosEmEspera.has(it.contrato)) return false;
+    if(!mostrarValidadosMedicao && contratosValidados.has(it.contrato)) return false;
     if(!itemBateBuscaMedicao(it, busca)) return false;
     for(const coluna of COLUNAS_FILTRAVEIS_MEDICAO){
       if(coluna === ignorarColuna) continue;
@@ -5033,6 +5051,7 @@ function itensFiltradosMedicao(enriquecidos, busca, ignorarColuna){
 
 let buscaMedicaoUauTexto = "";
 let mostrarEmEsperaMedicao = false;
+let mostrarValidadosMedicao = false;
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
@@ -5058,6 +5077,7 @@ function renderizarMedicaoUau(){
     return { ...item, mapa, comFvs, motivo };
   });
   const totalEmEspera = enriquecidos.filter(it => contratosEmEspera.has(it.contrato)).length;
+  const totalValidados = enriquecidos.filter(it => contratosValidados.has(it.contrato)).length;
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
@@ -5065,23 +5085,37 @@ function renderizarMedicaoUau(){
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(todos.length-totalOk)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalValidados)]), el("div",{class:"rotulo"},["Validados"])]),
   ]));
 
-  // Contratos presentes nos itens carregados — cada um com um botão pra por/tirar de espera de uma
-  // vez só (ela pediu: "seria melhor ficar em espera o contrato inteiro", não item por item).
+  // Contratos presentes nos itens carregados — cada um com dois botões BEM explícitos (texto, não só
+  // ícone — ela relatou não achar onde clicar): um pra por/tirar o contrato inteiro de espera (ela
+  // pediu: "seria melhor ficar em espera o contrato inteiro", não item por item) e outro pra marcar
+  // o contrato inteiro como já conferido/validado (lugar que ela pediu pra isso).
   const contratos = [...new Set(enriquecidos.map(it=>it.contrato).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
   if(contratos.length){
-    const wrapContratos = el("div",{style:"display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"});
+    const wrapContratos = el("div",{style:"display:flex;flex-direction:column;gap:6px;margin-bottom:12px;"});
     contratos.forEach(c => {
       const emEspera = contratosEmEspera.has(c);
+      const validado = contratosValidados.has(c);
       const qtd = enriquecidos.filter(it=>it.contrato===c).length;
-      wrapContratos.appendChild(el("div",{class:"chip", style: emEspera ? "border-color:var(--amarelo);background:var(--amarelo-claro);" : ""},[
-        `Contrato ${c} (${qtd})`,
-        el("button",{onclick:()=>{
-          if(emEspera) contratosEmEspera.delete(c); else contratosEmEspera.add(c);
-          salvarMedicaoUau();
-          renderizarMedicaoUau();
-        }},[emEspera ? "▶" : "⏸"])
+      let corFundo = "";
+      if(validado) corFundo = "border-color:var(--verde);background:var(--verde-claro);";
+      else if(emEspera) corFundo = "border-color:var(--amarelo);background:var(--amarelo-claro);";
+      wrapContratos.appendChild(el("div",{class:"chip", style:`justify-content:space-between;padding:6px 8px 6px 12px;gap:10px;${corFundo}`},[
+        el("b",null,[`Contrato ${c} (${qtd})`]),
+        el("div",{style:"display:flex;gap:6px;flex-shrink:0;"},[
+          el("button",{class:"btn secundario pequeno", onclick:()=>{
+            if(emEspera) contratosEmEspera.delete(c); else contratosEmEspera.add(c);
+            salvarMedicaoUau();
+            renderizarMedicaoUau();
+          }},[emEspera ? "Retomar" : "Colocar em espera"]),
+          el("button",{class:"btn secundario pequeno", onclick:()=>{
+            if(validado) contratosValidados.delete(c); else contratosValidados.add(c);
+            salvarMedicaoUau();
+            renderizarMedicaoUau();
+          }},[validado ? "Desmarcar validado" : "Marcar como validado"])
+        ])
       ]));
     });
     area.appendChild(wrapContratos);
@@ -5098,11 +5132,19 @@ function renderizarMedicaoUau(){
   lblEmEspera.appendChild(chkEmEspera);
   lblEmEspera.appendChild(document.createTextNode(`Mostrar contratos em espera (${totalEmEspera})`));
   toolbar.appendChild(lblEmEspera);
+  const lblValidados = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
+  const chkValidados = el("input",{type:"checkbox"});
+  chkValidados.checked = mostrarValidadosMedicao;
+  chkValidados.addEventListener("change", () => { mostrarValidadosMedicao = chkValidados.checked; renderizarMedicaoUau(); });
+  lblValidados.appendChild(chkValidados);
+  lblValidados.appendChild(document.createTextNode(`Mostrar contratos validados (${totalValidados})`));
+  toolbar.appendChild(lblValidados);
   toolbar.appendChild(el("div",{class:"espaco"}));
   toolbar.appendChild(el("button",{class:"btn perigo pequeno", onclick:()=>{
     if(!confirm(`Excluir TODOS os ${todos.length} itens da Conferência de Medição? Isso não desfaz.`)) return;
     medicaoItens = {};
     contratosEmEspera = new Set();
+    contratosValidados = new Set();
     salvarMedicaoUau();
     renderizarMedicaoUau();
   }},["Limpar tudo"]));
