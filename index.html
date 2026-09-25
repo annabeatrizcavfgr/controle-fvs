@@ -4898,9 +4898,6 @@ function aplicarItensDaTabela(tabela){
     medicaoItens[chave] = {
       casa: linha.casa, codigo: linha.codigo, valor,
       contrato: linha.contrato, boletim: linha.boletim, empresa: linha.empresa,
-      pago: atual ? atual.pago : false,
-      fornecedorPago: atual ? atual.fornecedorPago : "",
-      dataPagamento: atual ? atual.dataPagamento : null,
       atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
     };
     if(atual) atualizados++; else novos++;
@@ -4938,7 +4935,10 @@ async function processarColagemMedicaoUau(){
   mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
 }
 
-let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, pago, fornecedorPago, dataPagamento, atualizadoEm, atualizadoPor} }
+// Não guarda mais pago/fornecedor pago/data de pagamento à parte — isso ficou obsoleto assim que a
+// colagem passou a trazer contrato+boletim+empresa por linha (ela apontou: o fornecedor já vem em
+// "empresa" e o boletim de medição É o evento de pagamento, não precisa mais confirmar isso à mão).
+let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, atualizadoEm, atualizadoPor} }
 let contratosEmEspera = new Set(); // nº de contrato inteiro posto de lado (ver botão "Colocar contrato em espera") — some da tela toda de uma vez, sem perder nada
 async function carregarMedicaoUau(){
   try{
@@ -4960,8 +4960,18 @@ function temFvsConcluida(lote, pacoteId, servico){
   return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
 }
 
+// Nome(s) do Formulário FVS que falta(m) pra fechar um pacote/serviço — ela precisa disso pra avisar
+// o responsável e ele achar a FVS certa no MOBUSS pra regularizar (o rótulo "servico" sozinho não
+// basta, o formulário pode ter um nome bem diferente do rótulo). Reaproveita formulariosDoRotulo,
+// já usado pra achar o mesmo tipo de correspondência no Completo.
+function formulariosFaltandoDoItem(mapa){
+  if(!mapa) return [];
+  return formulariosDoRotulo(mapa.pacoteId, mapa.servico).filter(Boolean);
+}
+
 let buscaMedicaoUauTexto = "";
 let mostrarEmEsperaMedicao = false;
+let filtroServicoMedicaoUau = ""; // "" = todos; senão, "pacoteId__servico" — pra conferir serviço a serviço
 function renderizarMedicaoUau(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
@@ -4971,7 +4981,7 @@ function renderizarMedicaoUau(){
   meta.textContent = `${todos.length} item(ns) medido(s) no total`;
 
   const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
-  let totalOk = 0, totalPago = 0;
+  let totalOk = 0;
   const enriquecidos = todos.map(item => {
     const mapa = mapaCodigo.get(item.codigo);
     const lote = extrairLote(item.casa);
@@ -4984,7 +4994,6 @@ function renderizarMedicaoUau(){
       motivo = `FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não Encerrada`;
     }
     if(comFvs) totalOk++;
-    if(item.pago) totalPago++;
     return { ...item, mapa, comFvs, motivo };
   });
   const totalEmEspera = enriquecidos.filter(it => contratosEmEspera.has(it.contrato)).length;
@@ -4994,7 +5003,6 @@ function renderizarMedicaoUau(){
     el("div",{class:"card-num"},[el("div",{class:"valor"},[String(todos.length)]), el("div",{class:"rotulo"},["Itens medidos"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(todos.length-totalOk)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalPago)]), el("div",{class:"rotulo"},["Pagos"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
   ]));
 
@@ -5022,6 +5030,23 @@ function renderizarMedicaoUau(){
   const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
   inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
   toolbar.appendChild(inpBusca);
+  // Filtro por serviço — pra conferir serviço a serviço (ex.: revisar só "Mureta de medição" de
+  // uma vez), em vez de precisar digitar o nome inteiro na busca livre.
+  const servicosPresentes = new Map(); // "pacoteId__servico" -> rótulo "Pacote / Serviço"
+  enriquecidos.forEach(it => {
+    if(!it.mapa) return;
+    const chave = it.mapa.pacoteId+"__"+it.mapa.servico;
+    if(servicosPresentes.has(chave)) return;
+    const pacote = cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+    servicosPresentes.set(chave, (pacote?pacote.nome:"?")+" / "+it.mapa.servico);
+  });
+  const selServico = el("select",{style:"max-width:280px;"},[el("option",{value:""},["Todos os serviços…"])]);
+  [...servicosPresentes.entries()].sort((a,b)=>a[1].localeCompare(b[1],"pt-BR")).forEach(([chave,rotulo]) => {
+    selServico.appendChild(el("option",{value:chave},[rotulo]));
+  });
+  selServico.value = servicosPresentes.has(filtroServicoMedicaoUau) ? filtroServicoMedicaoUau : "";
+  selServico.addEventListener("change", () => { filtroServicoMedicaoUau = selServico.value; renderizarMedicaoUau(); });
+  toolbar.appendChild(selServico);
   const lblEmEspera = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
   const chkEmEspera = el("input",{type:"checkbox"});
   chkEmEspera.checked = mostrarEmEsperaMedicao;
@@ -5041,6 +5066,9 @@ function renderizarMedicaoUau(){
 
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
   let filtrados = enriquecidos.filter(it => !contratosEmEspera.has(it.contrato) || mostrarEmEsperaMedicao);
+  if(filtroServicoMedicaoUau){
+    filtrados = filtrados.filter(it => it.mapa && (it.mapa.pacoteId+"__"+it.mapa.servico) === filtroServicoMedicaoUau);
+  }
   if(busca){
     filtrados = filtrados.filter(it => {
       const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
@@ -5066,39 +5094,33 @@ function renderizarMedicaoUau(){
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
         el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
-        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Empresa"]),
-        el("th",null,["Pago?"]),el("th",null,["Fornecedor pago"]),el("th",null,["Data pagamento"]),el("th",null,[""])
+        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Empresa"]),el("th",null,[""])
       ])]),
       el("tbody",null, mostrar.map(item => {
         const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
-        const chkPago = el("input",{type:"checkbox"});
-        chkPago.checked = !!item.pago;
-        const inpFornecedor = el("input",{type:"text", placeholder:"Fornecedor…", value: item.fornecedorPago||"", style:"width:140px;"});
-        const inpData = el("input",{type:"date"});
-        inpData.value = item.dataPagamento ? String(item.dataPagamento).slice(0,10) : "";
-        function salvarItem(){
-          medicaoItens[item.chave] = { ...medicaoItens[item.chave], pago: chkPago.checked, fornecedorPago: inpFornecedor.value.trim(), dataPagamento: inpData.value || null };
-          salvarMedicaoUau();
-        }
-        chkPago.addEventListener("change", () => { salvarItem(); renderizarMedicaoUau(); });
-        inpFornecedor.addEventListener("change", salvarItem);
-        inpData.addEventListener("change", salvarItem);
         const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
           if(!confirm(`Excluir o item "${item.casa} / ${item.codigo}"? Isso não desfaz — se ainda estiver na tabela colada, colar de novo recria ele.`)) return;
           delete medicaoItens[item.chave];
           salvarMedicaoUau();
           renderizarMedicaoUau();
         }},["Excluir"]);
-        return el("tr",{class: item.pago?"linha-ok":""},[
+        let celulaSituacao;
+        if(item.comFvs){
+          celulaSituacao = el("span",{class:"badge completo"},["Com FVS"]);
+        } else {
+          const faltando = formulariosFaltandoDoItem(item.mapa);
+          celulaSituacao = el("div",null,[
+            el("span",{class:"badge pendente"},["Sem FVS"]),
+            faltando.length ? el("div",{class:"sub",style:"margin-top:3px;font-size:11px;line-height:1.3;"},[`Falta: ${faltando.join(", ")}`]) : null
+          ]);
+        }
+        return el("tr",null,[
           el("td",null,[item.casa]), el("td",null,[item.codigo]),
           el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
           el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-          el("td",null,[item.comFvs ? el("span",{class:"badge completo"},["Com FVS"]) : el("span",{class:"badge pendente"},["Sem FVS"])]),
+          el("td",null,[celulaSituacao]),
           el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]), el("td",null,[item.empresa||"—"]),
-          el("td",null,[chkPago]),
-          el("td",null,[inpFornecedor]),
-          el("td",null,[inpData]),
           el("td",null,[btnExcluir])
         ]);
       }))
