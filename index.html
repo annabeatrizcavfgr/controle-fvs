@@ -466,7 +466,7 @@
 
     <div class="painel" id="painelMedicaoUau">
       <h3 style="margin-top:0;">Conferência de Medição (UAU)</h3>
-      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela crua da planilha de consulta (a mesma que já usa, com uma linha por item medido — não a tabela dinâmica) e cole aqui, com o cabeçalho junto. O app reconhece as colunas Cod_contrato, Cod_medicao, Descr_fornecedor, Cod_itemcontrato, Descr_itemcontrato, Descr_itemestrutura e Val_Acompanhado, e confere automaticamente se cada item medido já tem a FVS correspondente Encerrada.</div>
+      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Copie a tabela crua da planilha de consulta (a mesma que já usa, com uma linha por item medido — não a tabela dinâmica) e cole aqui, com o cabeçalho junto. O app reconhece as colunas Cod_contrato, Cod_medicao, Descr_fornecedor, Cod_itemcontrato, Descr_itemcontrato, Descr_itemestrutura, Val_Acompanhado e Data_medicao, e confere automaticamente se cada item medido já tem a FVS correspondente Encerrada.</div>
       <textarea id="colaMedicaoUau" placeholder="Clique aqui e cole (Ctrl+V) a tabela copiada, com o cabeçalho…" style="width:100%;min-height:80px;font-family:Consolas,monospace;font-size:11.5px;border:1px solid var(--cinza-300);border-radius:6px;padding:8px;"></textarea>
       <div class="toolbar" style="margin-top:8px;">
         <button class="btn" id="btnProcessarMedicaoUau">Processar tabela colada</button>
@@ -4755,7 +4755,8 @@ function normalizarHeaderMedicao(s){
 }
 const NOMES_COLUNAS_MEDICAO = {
   contrato: "Cod_contrato", boletim: "Cod_medicao", empresa: "Descr_fornecedor",
-  codigo: "Cod_composicaoacomp", descricao: "Descr_itemcontrato", casa: "Descr_itemestrutura", valor: "Val_Acompanhado"
+  codigo: "Cod_composicaoacomp", descricao: "Descr_itemcontrato", casa: "Descr_itemestrutura", valor: "Val_Acompanhado",
+  dataMedicao: "Data_medicao"
 };
 function localizarColunasMedicao(headerRow){
   const normalizados = headerRow.map(normalizarHeaderMedicao);
@@ -4776,8 +4777,19 @@ function localizarColunasMedicao(headerRow){
     codigo: indiceDe(h => h.includes("COMPOSICAOACOMP")),
     descricao: indiceDe(h => h.includes("ITEMCONTRATO") && h.includes("DESCR")),
     casa: indiceDe(h => h.includes("ITEMESTRUTURA") && h.includes("DESCR")),
-    valor: indiceDe(h => h.includes("ACOMPANHAD") && h.includes("VAL"))
+    valor: indiceDe(h => h.includes("ACOMPANHAD") && h.includes("VAL")),
+    // Data_medicao (a data em que o boletim fechou) — não Data_acompanhamento (data de execução do
+    // serviço); ela pediu especificamente o mês dessa data pra saber há quanto tempo cada item está
+    // pendente de FVS.
+    dataMedicao: indiceDe(h => h.includes("DATA") && h.includes("MEDICAO"))
   };
+}
+// "22/10/2025 00:00" ou "22/10/2025" -> "2025-10" (mesmo formato interno "AAAA-MM" já usado em
+// mesPagamento — ver formatarMesAno). Só o mês/ano importa aqui, não o dia exato.
+function extrairMesAnoData(texto){
+  const m = String(texto||"").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(!m) return null;
+  return `${m[3]}-${m[2].padStart(2,"0")}`;
 }
 // Formato flat: uma linha por item medido, cabeçalho de verdade na 1ª linha (ver comentário acima).
 // Cada linha já traz contrato/boletim/empresa/código/descrição/casa/valor juntos — nada de digitar
@@ -4802,7 +4814,8 @@ function parseTabelaColada(texto){
       contrato: (cols[colunas.contrato]||"").trim(),
       boletim: (cols[colunas.boletim]||"").trim(),
       empresa: (cols[colunas.empresa]||"").trim(),
-      bruto: (cols[colunas.valor]||"").trim()
+      bruto: (cols[colunas.valor]||"").trim(),
+      mesMedicao: extrairMesAnoData(cols[colunas.dataMedicao])
     };
   }).filter(r => r.casa && r.codigo);
   if(dados.length === 0) return { erro: "Não encontrei nenhuma linha de dados válida abaixo do cabeçalho." };
@@ -4897,7 +4910,7 @@ function aplicarItensDaTabela(tabela){
     const atual = medicaoItens[chave];
     medicaoItens[chave] = {
       casa: linha.casa, codigo: linha.codigo, valor,
-      contrato: linha.contrato, boletim: linha.boletim, empresa: linha.empresa,
+      contrato: linha.contrato, boletim: linha.boletim, empresa: linha.empresa, mesMedicao: linha.mesMedicao,
       atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
     };
     if(atual) atualizados++; else novos++;
@@ -4938,7 +4951,7 @@ async function processarColagemMedicaoUau(){
 // Não guarda mais pago/fornecedor pago/data de pagamento à parte — isso ficou obsoleto assim que a
 // colagem passou a trazer contrato+boletim+empresa por linha (ela apontou: o fornecedor já vem em
 // "empresa" e o boletim de medição É o evento de pagamento, não precisa mais confirmar isso à mão).
-let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, atualizadoEm, atualizadoPor} }
+let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, mesMedicao, atualizadoEm, atualizadoPor} }
 let contratosEmEspera = new Set(); // nº de contrato inteiro posto de lado (ver botão "Colocar contrato em espera") — some da tela toda de uma vez, sem perder nada
 async function carregarMedicaoUau(){
   try{
@@ -5027,7 +5040,7 @@ function renderizarMedicaoUau(){
   }
 
   const toolbar = el("div",{class:"toolbar",style:"margin:0 0 10px;"});
-  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
+  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim, mês ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
   inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
   toolbar.appendChild(inpBusca);
   // Filtro por serviço — pra conferir serviço a serviço (ex.: revisar só "Mureta de medição" de
@@ -5077,6 +5090,7 @@ function renderizarMedicaoUau(){
         descricao.toLowerCase().includes(busca) ||
         (it.contrato||"").toLowerCase().includes(busca) || (it.boletim||"").toLowerCase().includes(busca) ||
         (it.empresa||"").toLowerCase().includes(busca) ||
+        (it.mesMedicao && formatarMesAno(it.mesMedicao).toLowerCase().includes(busca)) ||
         (it.mapa && it.mapa.servico && it.mapa.servico.toLowerCase().includes(busca)) ||
         (pacote && pacote.nome.toLowerCase().includes(busca));
     });
@@ -5094,7 +5108,7 @@ function renderizarMedicaoUau(){
     el("table",{class:"tbl"},[
       el("thead",null,[el("tr",null,[
         el("th",null,["Casa"]),el("th",null,["Código"]),el("th",null,["Descrição UAU"]),el("th",null,["Pacote/Serviço"]),el("th",null,["Valor"]),
-        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Empresa"]),el("th",null,[""])
+        el("th",null,["Situação FVS"]),el("th",null,["Contrato"]),el("th",null,["Boletim"]),el("th",null,["Mês"]),el("th",null,["Empresa"]),el("th",null,[""])
       ])]),
       el("tbody",null, mostrar.map(item => {
         const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
@@ -5120,7 +5134,9 @@ function renderizarMedicaoUau(){
           el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
           el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
           el("td",null,[celulaSituacao]),
-          el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]), el("td",null,[item.empresa||"—"]),
+          el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]),
+          el("td",null,[item.mesMedicao ? formatarMesAno(item.mesMedicao) : "—"]),
+          el("td",null,[item.empresa||"—"]),
           el("td",null,[btnExcluir])
         ]);
       }))
