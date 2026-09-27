@@ -4988,19 +4988,23 @@ async function processarColagemMedicaoUau(){
 // colagem passou a trazer contrato+boletim+empresa por linha (ela apontou: o fornecedor já vem em
 // "empresa" e o boletim de medição É o evento de pagamento, não precisa mais confirmar isso à mão).
 let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, boletim, empresa, mesMedicao, atualizadoEm, atualizadoPor} }
-let contratosEmEspera = new Set(); // nº de contrato inteiro posto de lado (ver botão "Colocar contrato em espera") — some da tela toda de uma vez, sem perder nada
-let contratosValidados = new Set(); // nº de contrato inteiro já conferido/aprovado por inteiro — ela pediu um lugar pra marcar isso
+// Em espera/validado são por MEDIÇÃO (contrato+boletim), não pelo contrato inteiro — ela corrigiu:
+// a rotina dela confere boletim a boletim (um contrato tem vários boletins ao longo do tempo, cada
+// um é uma medição/conferência separada). Chave = contrato+"__"+boletim (ver chaveMedicao).
+let medicoesEmEspera = new Set();
+let medicoesValidadas = new Set();
+function chaveMedicao(contrato, boletim){ return (contrato||"")+"__"+(boletim||""); }
 async function carregarMedicaoUau(){
   try{
     const snap = await db.doc("medicaoUau").get();
     const dados = snap.exists ? snap.data() : {};
     medicaoItens = dados.itens || {};
-    contratosEmEspera = new Set(dados.contratosEmEspera || []);
-    contratosValidados = new Set(dados.contratosValidados || []);
-  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; contratosEmEspera = new Set(); contratosValidados = new Set(); }
+    medicoesEmEspera = new Set(dados.medicoesEmEspera || []);
+    medicoesValidadas = new Set(dados.medicoesValidadas || []);
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; medicoesEmEspera = new Set(); medicoesValidadas = new Set(); }
 }
 async function salvarMedicaoUau(){
-  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, contratosEmEspera: [...contratosEmEspera], contratosValidados: [...contratosValidados] }); }
+  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, medicoesEmEspera: [...medicoesEmEspera], medicoesValidadas: [...medicoesValidadas] }); }
   catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
 }
 
@@ -5062,8 +5066,8 @@ function itemBateBuscaMedicao(it, busca){
 // ativos (mesmo comportamento em cascata do AutoFilter do Excel).
 function itensFiltradosMedicao(enriquecidos, busca, ignorarColuna){
   return enriquecidos.filter(it => {
-    if(!mostrarEmEsperaMedicao && contratosEmEspera.has(it.contrato)) return false;
-    if(!mostrarValidadosMedicao && contratosValidados.has(it.contrato)) return false;
+    if(!mostrarEmEsperaMedicao && medicoesEmEspera.has(chaveMedicao(it.contrato,it.boletim))) return false;
+    if(!mostrarValidadosMedicao && medicoesValidadas.has(chaveMedicao(it.contrato,it.boletim))) return false;
     if(!itemBateBuscaMedicao(it, busca)) return false;
     for(const coluna of COLUNAS_FILTRAVEIS_MEDICAO){
       if(coluna === ignorarColuna) continue;
@@ -5110,57 +5114,60 @@ function linhaItemMedicaoTr(item){
 /* ---- Conferência por contrato: ela pediu uma sequência tipo a do Avanço Físico — escolhe um
    contrato numa lista navegável, e confere em 3 passos: 1) itens (tem FVS?), 2) pagamento (algum
    código do contrato ficou de fora de alguma casa?), 3) valor pago por casa. ---- */
-let contratoSelecionadoMedicao = null; // null = mostra a lista de contratos; senão, o nº do contrato aberto
+let contratoSelecionadoMedicao = null; // null = mostra a lista de medições; senão, {contrato, boletim} da medição aberta
 let abaContratoMedicao = "itens"; // "itens" | "pagamento" | "valor"
 let buscaContratosMedicao = "";
 let buscaItensContratoMedicao = "";
 
-// Lista de contratos navegável — ela pediu "mais bonitinha", já que vão se acumular muitos contratos
-// em espera. Mostra TODOS os contratos (em espera ou não), com busca e um badge de status, porque o
-// propósito aqui é justamente navegar entre eles pra retomar depois.
+// Lista de MEDIÇÕES navegável (uma por contrato+boletim, não por contrato inteiro) — ela corrigiu:
+// a rotina dela confere boletim a boletim, um contrato tem vários boletins ao longo do tempo e cada
+// um é uma conferência separada. Mostra TODAS as medições (em espera ou não), com busca e um badge
+// de status, porque o propósito aqui é justamente navegar entre elas pra retomar depois.
 function renderizarListaContratosMedicao(area, enriquecidos){
-  const porContrato = new Map();
+  const porMedicao = new Map(); // chaveMedicao -> itens
   enriquecidos.forEach(it => {
     if(!it.contrato) return;
-    if(!porContrato.has(it.contrato)) porContrato.set(it.contrato, []);
-    porContrato.get(it.contrato).push(it);
+    const chave = chaveMedicao(it.contrato, it.boletim);
+    if(!porMedicao.has(chave)) porMedicao.set(chave, []);
+    porMedicao.get(chave).push(it);
   });
-  const contratos = [...porContrato.keys()].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
-  if(contratos.length === 0) return;
+  const medicoes = [...porMedicao.keys()].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
+  if(medicoes.length === 0) return;
 
-  area.appendChild(el("h4",{style:"margin:14px 0 6px;"},["Contratos"]));
-  const inpBuscaContrato = el("input",{type:"text", placeholder:"Buscar contrato ou empresa…", value: buscaContratosMedicao, style:"width:100%;max-width:360px;margin-bottom:10px;"});
+  area.appendChild(el("h4",{style:"margin:14px 0 6px;"},["Medições"]));
+  const inpBuscaContrato = el("input",{type:"text", placeholder:"Buscar contrato, boletim ou empresa…", value: buscaContratosMedicao, style:"width:100%;max-width:360px;margin-bottom:10px;"});
   inpBuscaContrato.addEventListener("input", () => { buscaContratosMedicao = inpBuscaContrato.value; renderizarMedicaoUau(); });
   area.appendChild(inpBuscaContrato);
 
   const busca = buscaContratosMedicao.trim().toLowerCase();
   const grade = el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;"});
   let algumVisivel = false;
-  contratos.forEach(c => {
-    const itensContrato = porContrato.get(c);
-    const empresas = [...new Set(itensContrato.map(it=>it.empresa).filter(Boolean))];
-    if(busca && !(c.toLowerCase().includes(busca) || empresas.some(e=>e.toLowerCase().includes(busca)))) return;
+  medicoes.forEach(chave => {
+    const itensMedicao = porMedicao.get(chave);
+    const { contrato, boletim } = itensMedicao[0];
+    const empresas = [...new Set(itensMedicao.map(it=>it.empresa).filter(Boolean))];
+    if(busca && !(contrato.toLowerCase().includes(busca) || (boletim||"").toLowerCase().includes(busca) || empresas.some(e=>e.toLowerCase().includes(busca)))) return;
     algumVisivel = true;
-    const emEspera = contratosEmEspera.has(c);
-    const validado = contratosValidados.has(c);
-    const totalOkContrato = itensContrato.filter(it=>it.comFvs).length;
+    const emEspera = medicoesEmEspera.has(chave);
+    const validado = medicoesValidadas.has(chave);
+    const totalOkMedicao = itensMedicao.filter(it=>it.comFvs).length;
     let corBorda = "var(--cinza-300)", corFundo = "#fff";
     if(validado){ corBorda = "var(--verde)"; corFundo = "var(--verde-claro)"; }
     else if(emEspera){ corBorda = "var(--amarelo)"; corFundo = "var(--amarelo-claro)"; }
     grade.appendChild(el("div",{
       style:`border:1px solid ${corBorda};background:${corFundo};border-radius:8px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:3px;`,
-      onclick:()=>{ contratoSelecionadoMedicao = c; abaContratoMedicao = "itens"; buscaItensContratoMedicao = ""; renderizarMedicaoUau(); }
+      onclick:()=>{ contratoSelecionadoMedicao = {contrato,boletim}; abaContratoMedicao = "itens"; buscaItensContratoMedicao = ""; renderizarMedicaoUau(); }
     },[
       el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:6px;"},[
-        el("b",{style:"font-size:13.5px;"},[`Contrato ${c}`]),
+        el("b",{style:"font-size:13.5px;"},[`Contrato ${contrato} · Boletim ${boletim||"—"}`]),
         validado ? el("span",{class:"badge completo"},["Validado"]) : (emEspera ? el("span",{class:"badge pendente"},["Em espera"]) : null)
       ]),
       el("div",{class:"sub",style:"margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"},[empresas.join(", ")||"—"]),
-      el("div",{style:"font-size:11.5px;color:var(--cinza-700);"},[`${itensContrato.length} item(ns) · ${totalOkContrato}/${itensContrato.length} com FVS`])
+      el("div",{style:"font-size:11.5px;color:var(--cinza-700);"},[`${itensMedicao.length} item(ns) · ${totalOkMedicao}/${itensMedicao.length} com FVS`])
     ]));
   });
   if(!algumVisivel){
-    area.appendChild(el("div",{class:"msg-vazio"},["Nenhum contrato encontrado com essa busca."]));
+    area.appendChild(el("div",{class:"msg-vazio"},["Nenhuma medição encontrada com essa busca."]));
   } else {
     area.appendChild(grade);
   }
@@ -5191,10 +5198,10 @@ function renderizarAbaItensContrato(area, itensContrato){
   ]));
 }
 
-// Aba 2: pagamento — pra cada casa do contrato, os códigos do contrato (o conjunto de códigos que já
-// apareceu em algum item desse contrato — "os itens que ela informou que fazem parte do contrato")
-// que NÃO aparecem nessa casa viram um alerta. É o cruzamento que faltava: hoje só se conferia se o
-// que foi pago tem FVS, não se TODOS os itens do contrato estão sendo pagos em TODAS as casas dele.
+// Aba 2: pagamento — pra cada casa DESSA MEDIÇÃO (contrato+boletim), os códigos que já apareceram
+// nela ("os itens que ela informou que fazem parte do contrato") que NÃO aparecem nessa casa viram
+// um alerta. É o cruzamento que faltava: hoje só se conferia se o que foi pago tem FVS, não se TODOS
+// os itens da medição estão sendo pagos em TODAS as casas dela.
 function renderizarAbaPagamentoContrato(area, itensContrato){
   const codigosContrato = [...new Set(itensContrato.map(it=>it.codigo))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
   const casas = [...new Set(itensContrato.map(it=>it.casa))].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
@@ -5249,40 +5256,51 @@ function renderizarAbaValorPorCasaContrato(area, itensContrato){
   ]));
 }
 
-function renderizarDetalheContrato(area, enriquecidos, contrato){
-  const itensContrato = enriquecidos.filter(it=>it.contrato===contrato);
-  if(itensContrato.length === 0){ contratoSelecionadoMedicao = null; return; }
-  const emEspera = contratosEmEspera.has(contrato);
-  const validado = contratosValidados.has(contrato);
-  const empresas = [...new Set(itensContrato.map(it=>it.empresa).filter(Boolean))];
+function renderizarDetalheContrato(area, enriquecidos, medicaoAlvo){
+  const { contrato, boletim } = medicaoAlvo;
+  const chave = chaveMedicao(contrato, boletim);
+  const itensMedicao = enriquecidos.filter(it=>chaveMedicao(it.contrato,it.boletim)===chave);
+  if(itensMedicao.length === 0){ contratoSelecionadoMedicao = null; return; }
+  const emEspera = medicoesEmEspera.has(chave);
+  const validado = medicoesValidadas.has(chave);
+  const empresas = [...new Set(itensMedicao.map(it=>it.empresa).filter(Boolean))];
 
-  area.appendChild(el("button",{class:"btn secundario pequeno", style:"margin-bottom:8px;", onclick:()=>{ contratoSelecionadoMedicao = null; renderizarMedicaoUau(); }},["← Voltar pra lista de contratos"]));
+  area.appendChild(el("button",{class:"btn secundario pequeno", style:"margin-bottom:8px;", onclick:()=>{ contratoSelecionadoMedicao = null; renderizarMedicaoUau(); }},["← Voltar pra lista de medições"]));
   area.appendChild(el("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;"},[
     el("div",null,[
-      el("h4",{style:"margin:0;"},[`Contrato ${contrato}`]),
+      el("h4",{style:"margin:0;"},[`Contrato ${contrato} · Boletim ${boletim||"—"}`]),
       el("div",{class:"sub",style:"margin:2px 0 0;"},[empresas.join(", ")||"—"])
     ]),
     el("div",{style:"display:flex;gap:6px;flex-shrink:0;"},[
       el("button",{onclick:()=>{
-        if(emEspera) contratosEmEspera.delete(contrato); else contratosEmEspera.add(contrato);
+        if(emEspera) medicoesEmEspera.delete(chave); else medicoesEmEspera.add(chave);
         salvarMedicaoUau(); renderizarMedicaoUau();
       }},[emEspera ? "▶" : "⏸"]),
       el("button",{class:"btn secundario pequeno", onclick:()=>{
-        if(validado) contratosValidados.delete(contrato); else contratosValidados.add(contrato);
+        if(validado) medicoesValidadas.delete(chave); else medicoesValidadas.add(chave);
         salvarMedicaoUau(); renderizarMedicaoUau();
-      }},[validado ? "Desmarcar validado" : "Marcar como validado"])
+      }},[validado ? "Desmarcar validado" : "Marcar como validado"]),
+      el("button",{class:"btn perigo pequeno", onclick:()=>{
+        if(!confirm(`Excluir TODOS os ${itensMedicao.length} item(ns) do Contrato ${contrato} · Boletim ${boletim||"—"}? Isso não desfaz — se colar essa medição de novo, ela recria os itens.`)) return;
+        itensMedicao.forEach(it => delete medicaoItens[it.chave]);
+        medicoesEmEspera.delete(chave);
+        medicoesValidadas.delete(chave);
+        salvarMedicaoUau();
+        contratoSelecionadoMedicao = null;
+        renderizarMedicaoUau();
+      }},["Excluir medição inteira"])
     ])
   ]));
 
   const abas = el("div",{class:"toolbar",style:"margin-bottom:10px;"});
-  [["itens","1. Itens (tem FVS?)"],["pagamento","2. Pagamento (falta algo?)"],["valor","3. Valor por casa"]].forEach(([chave,rotulo]) => {
-    abas.appendChild(el("button",{class: abaContratoMedicao===chave ? "btn pequeno" : "btn secundario pequeno", onclick:()=>{ abaContratoMedicao = chave; renderizarMedicaoUau(); }},[rotulo]));
+  [["itens","1. Itens (tem FVS?)"],["pagamento","2. Pagamento (falta algo?)"],["valor","3. Valor por casa"]].forEach(([abaChave,rotulo]) => {
+    abas.appendChild(el("button",{class: abaContratoMedicao===abaChave ? "btn pequeno" : "btn secundario pequeno", onclick:()=>{ abaContratoMedicao = abaChave; renderizarMedicaoUau(); }},[rotulo]));
   });
   area.appendChild(abas);
 
-  if(abaContratoMedicao === "pagamento") renderizarAbaPagamentoContrato(area, itensContrato);
-  else if(abaContratoMedicao === "valor") renderizarAbaValorPorCasaContrato(area, itensContrato);
-  else renderizarAbaItensContrato(area, itensContrato);
+  if(abaContratoMedicao === "pagamento") renderizarAbaPagamentoContrato(area, itensMedicao);
+  else if(abaContratoMedicao === "valor") renderizarAbaValorPorCasaContrato(area, itensMedicao);
+  else renderizarAbaItensContrato(area, itensMedicao);
 }
 
 let buscaMedicaoUauTexto = "";
@@ -5312,8 +5330,8 @@ function renderizarMedicaoUau(){
     if(comFvs) totalOk++;
     return { ...item, mapa, comFvs, motivo };
   });
-  const totalEmEspera = enriquecidos.filter(it => contratosEmEspera.has(it.contrato)).length;
-  const totalValidados = enriquecidos.filter(it => contratosValidados.has(it.contrato)).length;
+  const totalEmEspera = enriquecidos.filter(it => medicoesEmEspera.has(chaveMedicao(it.contrato,it.boletim))).length;
+  const totalValidados = enriquecidos.filter(it => medicoesValidadas.has(chaveMedicao(it.contrato,it.boletim))).length;
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
@@ -5340,21 +5358,21 @@ function renderizarMedicaoUau(){
   chkEmEspera.checked = mostrarEmEsperaMedicao;
   chkEmEspera.addEventListener("change", () => { mostrarEmEsperaMedicao = chkEmEspera.checked; renderizarMedicaoUau(); });
   lblEmEspera.appendChild(chkEmEspera);
-  lblEmEspera.appendChild(document.createTextNode(`Mostrar contratos em espera (${totalEmEspera})`));
+  lblEmEspera.appendChild(document.createTextNode(`Mostrar medições em espera (${totalEmEspera})`));
   toolbar.appendChild(lblEmEspera);
   const lblValidados = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
   const chkValidados = el("input",{type:"checkbox"});
   chkValidados.checked = mostrarValidadosMedicao;
   chkValidados.addEventListener("change", () => { mostrarValidadosMedicao = chkValidados.checked; renderizarMedicaoUau(); });
   lblValidados.appendChild(chkValidados);
-  lblValidados.appendChild(document.createTextNode(`Mostrar contratos validados (${totalValidados})`));
+  lblValidados.appendChild(document.createTextNode(`Mostrar medições validadas (${totalValidados})`));
   toolbar.appendChild(lblValidados);
   toolbar.appendChild(el("div",{class:"espaco"}));
   toolbar.appendChild(el("button",{class:"btn perigo pequeno", onclick:()=>{
     if(!confirm(`Excluir TODOS os ${todos.length} itens da Conferência de Medição? Isso não desfaz.`)) return;
     medicaoItens = {};
-    contratosEmEspera = new Set();
-    contratosValidados = new Set();
+    medicoesEmEspera = new Set();
+    medicoesValidadas = new Set();
     salvarMedicaoUau();
     renderizarMedicaoUau();
   }},["Limpar tudo"]));
