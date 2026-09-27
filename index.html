@@ -165,6 +165,7 @@
   .no-vagao-cab input, .no-pacote-cab input{font-weight:700;font-size:13px;border:1px solid transparent;border-radius:4px;padding:3px 6px;background:transparent;flex:1;min-width:0;}
   .no-vagao-cab input:hover, .no-vagao-cab input:focus, .no-pacote-cab input:hover, .no-pacote-cab input:focus{border-color:var(--cinza-300);background:#fff;}
   .no-pacote-cab input{font-size:12.5px;}
+  .avatar-pasta{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;background:var(--cor-destaque,var(--vinho));flex-shrink:0;}
   .avatar-pasta.pequeno{width:24px;height:24px;border-radius:6px;font-size:10.5px;margin-bottom:0;flex-shrink:0;}
   .linha-servico{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--cinza-200);border-radius:6px;font-size:12.5px;background:var(--cinza-100);}
   .linha-servico .info{display:flex;flex-direction:column;gap:1px;}
@@ -236,7 +237,7 @@
   .card-pasta{background:#fff;border:1px solid var(--cinza-200);border-radius:12px;padding:16px;cursor:pointer;transition:.14s;text-align:left;position:relative;overflow:hidden;}
   .card-pasta::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--cor-destaque,var(--vinho));}
   .card-pasta:hover{border-color:var(--cinza-300);box-shadow:var(--sombra);transform:translateY(-2px);}
-  .card-pasta .avatar-pasta{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;background:var(--cor-destaque,var(--vinho));margin-bottom:10px;}
+  .card-pasta .avatar-pasta{margin-bottom:10px;}
   .card-pasta .nome-pasta{font-weight:700;font-size:13.5px;color:var(--cinza-900);margin-bottom:6px;word-break:break-word;}
   .card-pasta .meta-pasta{font-size:11.5px;color:var(--cinza-700);}
   .card-pasta .barra-fundo{margin-top:10px;height:6px;}
@@ -2783,6 +2784,42 @@ function corPorTexto(txt){
   for(let i=0;i<txt.length;i++) hash = (hash*31 + txt.charCodeAt(i)) >>> 0;
   return PALETA_DESTAQUE[hash % PALETA_DESTAQUE.length];
 }
+
+// Cores fixas do macrofluxo dela (o quadro Fechamento/Acabamento/Entrega que ela usa fora do app) —
+// vagão/pacote com nome batendo (exato ou como prefixo, pra cobrir variantes tipo "REVESTIMENTO
+// CERÂMICO - CASA") usa a MESMA cor do macrofluxo, em vez da cor por hash; o que não bate cai no
+// hash de sempre (corPorTexto). Chaves em ordem do mais específico pro mais genérico não importa
+// aqui — startsWith já resolve, mas comparamos do nome mais longo pro mais curto pra evitar que uma
+// chave curta demais capture um nome que na verdade bate melhor com outra.
+const CORES_MACROFLUXO = {
+  "FECHAMENTO": "#E3A61F",
+  "ACABAMENTO": "#18A9E0",
+  "ENTREGA": "#AD9BD1",
+  "CONTRAPISO": "#6E6F72",
+  "REBOCO": "#A9861F",
+  "CHECK-LIST REBOCO": "#2FB8DB",
+  "RAMPAS E CALÇADAS": "#AAB6DE",
+  "COBERTURA": "#9E1B1F",
+  "GESSO INTERNO": "#C9CACC",
+  "CHECK-LIST GESSO": "#2FB8DB",
+  "MASSA PVA": "#6482A8",
+  "REVESTIMENTO CERÂMICO": "#D0141E",
+  "CHECK-LIST REVESTIMENTO": "#2FB8DB",
+  "ESQUADRIAS DE ALUMÍNIO": "#2A2A2E",
+  "PINTURA FINAL": "#1E2C56",
+  "ESQUADRIAS DE MADEIRA": "#48484C",
+  "ACABAMENTOS FINAIS": "#EF6FBA",
+  "VISTORIA": "#E01C9E"
+};
+const CHAVES_CORES_MACROFLUXO = Object.keys(CORES_MACROFLUXO).sort((a,b)=>b.length-a.length);
+function normalizarNomeMacrofluxo(txt){
+  return normTexto(txt).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+}
+function corDoVagaoOuPacote(nome){
+  const normalizado = normalizarNomeMacrofluxo(nome);
+  const chave = CHAVES_CORES_MACROFLUXO.find(k => normalizado.startsWith(normalizarNomeMacrofluxo(k)));
+  return chave ? CORES_MACROFLUXO[chave] : corPorTexto(nome);
+}
 function iniciaisTexto(txt){
   const palavras = txt.trim().split(/\s+/).filter(Boolean);
   if(palavras.length === 0) return "?";
@@ -2961,7 +2998,7 @@ function construirNoVagao(vagao, pacotesDoVagao, busca){
   const cab = el("div",{class:"no-vagao-cab"},[
     alcaArrastar,
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corPorTexto(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
+    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
     inpNome,
     el("span",{class:"meta-no"},[`${pacotesDoVagao.length} pacote(s) · ${totalServicos} serviço(s)`]),
     el("div",{class:"acoes-no"},[
@@ -3033,6 +3070,7 @@ function construirNoPacote(pac, busca){
 
   const cab = el("div",{class:"no-pacote-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
+    el("span",{class:"avatar-pasta pequeno", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`},[iniciaisTexto(pac.nome)]),
     inpNome,
     el("span",{class:"meta-no"},[`${servicos.length} serviço(s)`]),
     el("div",{class:"acoes-no"},[
@@ -4200,7 +4238,7 @@ function construirArvoreVagao(vagao, pacotesDoVagao, todasFiltradas, busca, esta
   const expandido = busca ? true : estado.vagoes.has(vagao.id);
   const cab = el("div",{class:"no-vagao-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corPorTexto(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
+    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
     el("span",{style:"font-weight:700;font-size:13px;flex:1;"},[vagao.nome]),
     el("span",{class:"meta-no"},[`${regrasDoVagao.length} serviço(s)`])
   ]);
@@ -4247,6 +4285,7 @@ function construirArvorePacote(pac, regrasDoPacote, busca, estado, linhaFn, colu
   const expandido = busca ? true : estado.pacotes.has(pac.id);
   const cab = el("div",{class:"no-pacote-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
+    el("span",{class:"avatar-pasta pequeno", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`},[iniciaisTexto(pac.nome)]),
     el("span",{style:"font-weight:600;font-size:12.5px;flex:1;"},[pac.nome]),
     el("span",{class:"meta-no"},[`${regrasDoPacote.length} serviço(s)`]),
     botoesMarcarTodos(regrasDoPacote, marcarTodosFn)
@@ -4733,7 +4772,7 @@ function renderizarMapeamentoMedicao(){
   vagoesComPacotesEmOrdem().forEach(vagao => {
     const pacotesComItens = pacotesDoVagaoEmOrdem(vagao.id).filter(pac=>porPacote.has(pac.id));
     if(pacotesComItens.length === 0) return;
-    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corPorTexto(vagao.nome)};`},[vagao.nome]));
+    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[vagao.nome]));
     pacotesComItens.forEach(pac => {
       area.appendChild(el("div",{style:"font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--cinza-700);margin:12px 0 4px 6px;"},[pac.nome + (pac.semPrevision ? " (sem avanço)" : "")]));
       renderizarItensAgrupadosPorServico(porPacote.get(pac.id));
@@ -5551,7 +5590,7 @@ function renderizarResumo(){
     const blocosPacote = pacs.map(pac => blocoResumoPacote(pac, itensSemana, soPendentes)).filter(Boolean);
     if(blocosPacote.length === 0) return;
     algumBloco = true;
-    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corPorTexto(vagaoObj.nome)};`},[vagaoObj.nome]));
+    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corDoVagaoOuPacote(vagaoObj.nome)};`},[vagaoObj.nome]));
     blocosPacote.forEach(b => area.appendChild(b));
   });
   if(!algumBloco){
@@ -5703,7 +5742,7 @@ function renderizarCompletoNivelCategorias(area){
     const itens = completoLista.filter(i=>idsCat.has(i.pacoteId));
     const completos = itens.filter(i=>i.completo).length;
     const pct = itens.length ? Math.round(completos/itens.length*100) : 0;
-    grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corPorTexto(cat)};`, onclick:()=>{ completoNav.categoria = cat; renderizarCompleto(); }},[
+    grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(cat)};`, onclick:()=>{ completoNav.categoria = cat; renderizarCompleto(); }},[
       el("div",{class:"avatar-pasta"},[iniciaisTexto(cat)]),
       el("div",{class:"nome-pasta"},[cat]),
       el("div",{class:"meta-pasta"},[`${pacotesCat.length} pacote(s)${itens.length? ` · ${completos}/${itens.length} completos`:""}`]),
@@ -5723,7 +5762,7 @@ function renderizarCompletoNivelPacotes(area, categoria){
   const grade = el("div",{class:"grade-pastas"});
   pacotesCat.forEach(pac => {
     const stats = statsPorPacote(pac.id);
-    grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corPorTexto(pac.nome)};`, onclick:()=>{ completoNav.pacoteId = pac.id; renderizarCompleto(); }},[
+    grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`, onclick:()=>{ completoNav.pacoteId = pac.id; renderizarCompleto(); }},[
       el("div",{class:"avatar-pasta"},[iniciaisTexto(pac.nome)]),
       el("div",{class:"nome-pasta"},[pac.nome]),
       el("div",{class:"meta-pasta"},[stats.total ? `${stats.completos}/${stats.total} completos (${stats.pct}%)` : "sem atividade ainda"]),
