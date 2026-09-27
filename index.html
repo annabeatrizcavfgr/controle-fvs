@@ -265,6 +265,18 @@
 
   .toast-wrap{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:1001;display:flex;flex-direction:column;gap:8px;align-items:center;}
   .toast{background:var(--vermelho);color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:var(--sombra);max-width:90vw;}
+  .toast.neutro{background:var(--cinza-900);}
+  .toast.com-acao{display:flex;align-items:center;gap:14px;}
+  .toast.com-acao button{background:#fff;color:var(--cinza-900);border:none;border-radius:6px;padding:5px 12px;font-size:12.5px;font-weight:700;cursor:pointer;flex-shrink:0;}
+
+  /* nome de vagão/pacote dentro de uma caixa na cor do macrofluxo (em vez da sigla ao lado) */
+  .nome-colorido{display:inline-block;padding:4px 10px;border-radius:6px;font-weight:700;font-size:12.5px;line-height:1.3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .nome-colorido.grande{font-size:13px;padding:5px 12px;}
+  .no-vagao-cab input.nome-colorido-input, .no-pacote-cab input.nome-colorido-input{border-radius:6px;padding:4px 10px;flex:0 1 auto;width:auto;min-width:120px;}
+  .no-servico{border:1px solid var(--cinza-200);border-radius:8px;background:#fff;overflow:hidden;margin-bottom:8px;}
+  .no-servico-cab{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--cinza-100);}
+  .no-servico-cab:hover{background:var(--cinza-200);}
+  .no-servico-corpo{padding:8px 10px 2px;border-top:1px solid var(--cinza-200);}
 </style>
 </head>
 <body>
@@ -279,6 +291,7 @@
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <span id="whoamiSlot" style="font-size:12px;opacity:.9;white-space:nowrap;"></span>
+      <button class="btn secundario pequeno" id="btnBackups" title="Voltar os dados pra como estavam num dia anterior" style="display:none;">Backups</button>
       <button class="btn secundario pequeno" id="btnUsuarios" title="Gerenciar quem pode entrar e editar" style="display:none;">Usuários</button>
       <button class="btn secundario pequeno" id="btnTrocarObra" title="Trocar para outra obra, ou cadastrar uma obra nova" style="display:none;">Trocar de obra</button>
       <button class="btn secundario pequeno" id="btnSair" style="display:none;">Sair</button>
@@ -361,7 +374,7 @@
   <div class="aba-conteudo" id="aba-semana">
     <div class="painel">
       <h3 style="margin-top:0;">Exportação atual do MOBUSS</h3>
-      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Envie o arquivo .xlsx exportado do MOBUSS ("Resumo Formulários Realizados"). Cada upload novo substitui automaticamente a exportação anterior — o MOBUSS já exporta de forma cumulativa, então isso nunca perde dado. O processamento é 100% local, no seu navegador — nada é enviado para nenhum servidor.</div>
+      <div class="sub" style="margin-top:-6px;margin-bottom:10px;">Envie o arquivo .xlsx exportado do MOBUSS ("Resumo Formulários Realizados"). Cada upload novo substitui automaticamente a exportação anterior — o MOBUSS já exporta de forma cumulativa, então isso nunca perde dado. Fica salvo pra todo mundo da obra — quem abrir o app depois já vê a mesma exportação.</div>
       <div class="dropzone" id="dropzone">
         <div><strong>Clique para escolher</strong> ou arraste aqui os arquivos .xlsx</div>
         <input type="file" id="inputArquivo" accept=".xlsx,.xls" multiple>
@@ -378,7 +391,7 @@
       <div class="cad-secao" style="margin-bottom:10px;">
         <div class="cad-secao-cab" id="cabSecaoVersoes">
           <span class="seta-secao" id="seta-secaoVersoes">▸</span>
-          <h3 style="font-size:13px;"Versões salvas <span id="ctVersoes" class="sub" style="font-weight:400;"></span></h3>
+          <h3 style="font-size:13px;">Versões salvas <span id="ctVersoes" class="sub" style="font-weight:400;"></span></h3>
         </div>
         <div id="secaoVersoes" style="display:none;">
           <div class="sub" style="margin:4px 0 10px;">Cada vez que você importa uma exportação nova do MOBUSS, o filtro "Só novos desta semana" abaixo mostra só os serviços novos desde o último "Salvar avanço". Quando terminar de revisar e lançar a semana no Prevision, clique em "Salvar avanço" abaixo — isso vira o novo ponto de partida.</div>
@@ -444,6 +457,7 @@
           <button class="seg-btn" data-modo="casa">Por casa</button>
         </div>
         <div class="espaco"></div>
+        <button class="btn secundario" id="btnPreencherMesesMedicao" title="Usa o mês do boletim da Conferência de Medição (UAU) pra preencher os serviços ainda sem mês de pagamento">Preencher meses pela medição</button>
         <button class="btn secundario" id="btnExportPagamento">Exportar CSV</button>
       </div>
       <div class="toolbar" id="toolbarPagamentoPacote">
@@ -587,6 +601,16 @@ function createRemoteDb(){
           throw new Error("Falha ao salvar (HTTP "+r.status+"): "+(j.error||"erro desconhecido"));
         }
       },
+      // Gravação com controle de versão (ver criarDocSincronizado): só grava se o doc no servidor
+      // ainda estiver na versão baseRev. Devolve {ok, rev} ou {conflito, data, rev}.
+      async setVersionado(value, baseRev){
+        if(!checkWritable()) return { bloqueado:true };
+        const r = await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"set", data:value, baseRev: baseRev||0})});
+        const j = await r.json().catch(()=>({}));
+        if(r.status === 409 && j.conflict) return { conflito:true, data:j.data, rev:j.rev||0 };
+        if(!r.ok) throw new Error("Falha ao salvar (HTTP "+r.status+"): "+(j.error||"erro desconhecido"));
+        return { ok:true, rev:j.rev };
+      },
       async delete(){
         if(!checkWritable()) return;
         const r = await fetch(API, {method:"POST", headers: await authHeaders({"Content-Type":"application/json"}), body: JSON.stringify({path, action:"delete"})});
@@ -610,8 +634,10 @@ function createRemoteDb(){
       },
       orderBy(field, dir){ state.field=field; state.dir=dir||"asc"; return this; },
       limit(n){ state.n=n; return this; },
+      somenteIds(){ state.idsOnly=true; return this; },
       async get(){
         const params = new URLSearchParams({ path, collection:"true" });
+        if(state.idsOnly) params.set("idsOnly", "true");
         if(state.field) params.set("orderBy", state.field);
         if(state.dir) params.set("dir", state.dir);
         if(state.n!=null) params.set("limit", state.n);
@@ -653,6 +679,15 @@ function createLocalDb(){
         node[DATA] = JSON.parse(JSON.stringify(value));
         writeRoot(root);
       },
+      async setVersionado(value, baseRev){
+        const root = readRoot();
+        const node = nodeAt(root, parts, true);
+        const atualRev = (node[DATA] && node[DATA]._rev) || 0;
+        if(atualRev !== (baseRev||0)) return { conflito:true, data: node[DATA], rev: atualRev };
+        node[DATA] = Object.assign(JSON.parse(JSON.stringify(value)), { _rev: atualRev+1 });
+        writeRoot(root);
+        return { ok:true, rev: atualRev+1 };
+      },
       async delete(){
         const root = readRoot();
         const parentNode = nodeAt(root, parts.slice(0,-1), false);
@@ -676,9 +711,10 @@ function createLocalDb(){
       },
       orderBy(field, dir){ state.field = field; state.dir = dir||"asc"; return this; },
       limit(n){ state.n = n; return this; },
+      somenteIds(){ return this; },
       async get(){
         const node = nodeAt(readRoot(), parts, false) || {};
-        let docs = Object.keys(node).filter(k=>k!==DATA).map(id=>({ id, exists:true, data: ()=>node[id][DATA] }));
+        let docs = Object.keys(node).filter(k=>k!==DATA && node[k] && node[k][DATA]!==undefined).map(id=>({ id, exists:true, data: ()=>node[id][DATA] }));
         if(state.field){
           docs.sort((a,b)=>{ const av=a.data()[state.field], bv=b.data()[state.field]; const cmp = av<bv?-1:av>bv?1:0; return state.dir==="desc"?-cmp:cmp; });
         }
@@ -739,12 +775,14 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao","btnPreencherMesesMedicao"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
   const btnUsuarios = document.getElementById("btnUsuarios");
   if(btnUsuarios) btnUsuarios.style.display = isPlan ? "" : "none";
+  const btnBackups = document.getElementById("btnBackups");
+  if(btnBackups) btnBackups.style.display = isPlan ? "" : "none";
   const btnSair = document.getElementById("btnSair");
   if(btnSair) btnSair.style.display = CURRENT_USER ? "" : "none";
   const btnTrocarObra = document.getElementById("btnTrocarObra");
@@ -1248,14 +1286,220 @@ function migrarCategoriaParaVagao(){
   });
 }
 
+/* ===================== Sincronização entre pessoas (2026-09-27) =====================
+   Antes, cada clique regravava o documento inteiro (cfg ou medicaoUau) com o que ESTE navegador
+   tinha na memória — se ela e a Caroline estivessem com o app aberto ao mesmo tempo, quem salvasse
+   por último apagava, sem aviso, o que a outra tinha feito. Agora:
+   1) cada gravação leva a versão que foi lida (baseRev); o servidor recusa (409) se alguém gravou
+      no meio do caminho (ver api/db.js);
+   2) nesse caso o app faz uma "mescla de três vias": compara o que estava no servidor quando
+      carregou (base), o que eu tenho agora (meu) e o que está no servidor agora (deles), e fica com
+      as duas alterações — cada marcação de Prevision/pagamento, item de medição, pacote etc. é
+      combinado individualmente; só quando as duas pessoas mexeram NA MESMA coisa vale a minha;
+   3) gravações saem uma de cada vez, em fila (cliques rápidos não chegam mais fora de ordem);
+   4) ao voltar pra aba/janela (e a cada ~90s), puxa o que os outros gravaram. */
+function ehObjetoSimples(v){ return v!==null && typeof v==="object" && !Array.isArray(v); }
+function jsonEstavel(v){
+  if(Array.isArray(v)) return "["+v.map(jsonEstavel).join(",")+"]";
+  if(ehObjetoSimples(v)) return "{"+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+":"+jsonEstavel(v[k])).join(",")+"}";
+  return v===undefined ? "null" : JSON.stringify(v);
+}
+function clonarJson(v){ return v===undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+function criarSerializadorCache(){
+  const cache = new WeakMap();
+  return v => {
+    if(v===null || typeof v!=="object") return jsonEstavel(v);
+    let s = cache.get(v);
+    if(s===undefined){ s = jsonEstavel(v); cache.set(v, s); }
+    return s;
+  };
+}
+// base = como estava no servidor quando eu li; meu = o que eu tenho agora; deles = servidor agora.
+// undefined no resultado = item/chave apagado.
+function mesclar3(base, meu, deles, s){
+  s = s || criarSerializadorCache();
+  const sMeu = s(meu), sDeles = s(deles);
+  if(sMeu === sDeles) return meu;
+  const sBase = s(base);
+  if(sBase === sMeu) return deles;   // eu não mexi nisso — fica o deles
+  if(sBase === sDeles) return meu;   // eles não mexeram — fica o meu
+  // os dois mexeram: desce um nível pra combinar item a item
+  if(ehObjetoSimples(meu) && ehObjetoSimples(deles)){
+    const b = ehObjetoSimples(base) ? base : {};
+    const out = {};
+    new Set([...Object.keys(meu), ...Object.keys(deles)]).forEach(k => {
+      const v = mesclar3(b[k], meu[k], deles[k], s);
+      if(v !== undefined) out[k] = v;
+    });
+    return out;
+  }
+  if(Array.isArray(meu) && Array.isArray(deles)){
+    const b = Array.isArray(base) ? base : [];
+    const todosComId = arr => arr.every(x => ehObjetoSimples(x) && x.id!==undefined && x.id!==null);
+    if(todosComId(meu) && todosComId(deles) && todosComId(b)){
+      const porId = arr => new Map(arr.map(x=>[x.id,x]));
+      const mb = porId(b), mm = porId(meu), md = porId(deles);
+      const ordem = [...meu.map(x=>x.id), ...deles.map(x=>x.id).filter(id=>!mm.has(id))];
+      const out = [];
+      ordem.forEach(id => { const v = mesclar3(mb.get(id), mm.get(id), md.get(id), s); if(v !== undefined) out.push(v); });
+      return out;
+    }
+    if([...meu, ...deles, ...b].every(x => x===null || typeof x!=="object")){
+      const sB = new Set(b), sM = new Set(meu);
+      const removidosPorMim = new Set(b.filter(x=>!sM.has(x)));
+      const out = deles.filter(x=>!removidosPorMim.has(x));
+      const sOut = new Set(out);
+      meu.forEach(x => { if(!sB.has(x) && !sOut.has(x)){ out.push(x); sOut.add(x); } });
+      return out;
+    }
+  }
+  return meu;
+}
+
+// Um documento compartilhado (cfg ou medicaoUau) com fila de gravação + versão + mescla.
+//   obterLocal()            -> o objeto que deve ser gravado agora
+//   aplicarMesclado(m)      -> joga o resultado de uma mescla de volta na memória do app
+//   aoAtualizar()           -> redesenha a tela depois que chegou alteração de outra pessoa
+function criarDocSincronizado(caminho, opcoes){
+  let base = null, rev = 0;
+  let rodando = null, haPedido = false, esperando = [];
+  function limpar(v){
+    const c = clonarJson(v);
+    if(ehObjetoSimples(c)){ delete c._rev; delete c._snapshotEm; }
+    return c;
+  }
+  async function carregar(){
+    const snap = await db.doc(caminho).get();
+    const bruto = snap.exists ? snap.data() : null;
+    rev = (bruto && bruto._rev) || 0;
+    base = bruto ? limpar(bruto) : null;
+    return base ? clonarJson(base) : null;
+  }
+  async function enviar(){
+    let desejado = clonarJson(opcoes.obterLocal());
+    let mesclou = false;
+    for(let tentativa = 0; tentativa < 6; tentativa++){
+      const r = await db.doc(caminho).setVersionado(desejado, rev);
+      if(!r || r.bloqueado) return;
+      if(r.ok){
+        base = desejado; rev = r.rev;
+        if(mesclou){ mostrarToastInfo("Outra pessoa alterou os dados ao mesmo tempo — as duas alterações foram combinadas."); opcoes.aoAtualizar(); }
+        return;
+      }
+      const deles = limpar(r.data);
+      const mesclado = mesclar3(base, clonarJson(opcoes.obterLocal()), deles);
+      base = deles; rev = r.rev;
+      opcoes.aplicarMesclado(clonarJson(mesclado));
+      desejado = clonarJson(opcoes.obterLocal());
+      mesclou = true;
+    }
+    throw new Error("não consegui gravar depois de várias tentativas (muita gente salvando ao mesmo tempo) — recarregue a página");
+  }
+  async function processarFila(){
+    while(haPedido){
+      haPedido = false;
+      const lote = esperando; esperando = [];
+      try{ await enviar(); lote.forEach(p=>p.resolve()); }
+      catch(e){ lote.forEach(p=>p.reject(e)); }
+    }
+    rodando = null;
+  }
+  function salvar(){
+    return new Promise((resolve, reject) => {
+      esperando.push({resolve, reject});
+      haPedido = true;
+      if(!rodando) rodando = processarFila();
+    });
+  }
+  // Puxa o que outras pessoas gravaram. Devolve true se algo mudou.
+  async function atualizarDoServidor(){
+    if(rodando || haPedido) return false;
+    const snap = await db.doc(caminho).get();
+    const bruto = snap.exists ? snap.data() : null;
+    const novaRev = (bruto && bruto._rev) || 0;
+    if(!bruto || novaRev === rev) return false;
+    if(rodando || haPedido) return false;
+    const deles = limpar(bruto);
+    const local = clonarJson(opcoes.obterLocal());
+    const mesclado = mesclar3(base, local, deles);
+    const sobrouAlgoMeu = jsonEstavel(mesclado) !== jsonEstavel(deles);
+    base = deles; rev = novaRev;
+    opcoes.aplicarMesclado(clonarJson(mesclado));
+    if(sobrouAlgoMeu) salvar().catch(e=>mostrarToast("⚠️ Falha ao salvar: "+(e&&e.message?e.message:e)));
+    return true;
+  }
+  return { carregar, salvar, atualizarDoServidor, get rev(){ return rev; }, get ocupado(){ return !!rodando || haPedido; } };
+}
+
+const CAMPOS_CADASTRO = ["vagoes","pacotes","mapeamentos"];
+// o que vai pro servidor: com uma edição de Cadastro pela metade, grava a versão já confirmada
+// (cadastroBaseline) desses 3 campos — a edição só sobe quando ela clicar "Salvar alterações".
+function cfgParaGravar(){
+  if(cadastroSujo && cadastroBaseline) return { ...cfg, vagoes: cadastroBaseline.vagoes, pacotes: cadastroBaseline.pacotes, mapeamentos: cadastroBaseline.mapeamentos };
+  return cfg;
+}
+function aplicarCfgMesclado(m){
+  const baselineAnterior = cadastroBaseline;
+  cacheBaseline = null;
+  Object.keys(m).forEach(k => { if(!(cadastroSujo && CAMPOS_CADASTRO.includes(k))) cfg[k] = m[k]; });
+  ["vagoes","pacotes","mapeamentos","avancosManuais","knownFormularios","knownSublocais","versoes","mapeamentosMedicao"].forEach(k => { if(!Array.isArray(cfg[k])) cfg[k] = []; });
+  if(!ehObjetoSimples(cfg.statusServico)) cfg.statusServico = {};
+  if(!ehObjetoSimples(cfg.descricoesUau)) cfg.descricoesUau = {};
+  if(cadastroSujo && baselineAnterior){
+    // edição de Cadastro pela metade: re-aplica a edição dela por cima do que chegou
+    CAMPOS_CADASTRO.forEach(k => { cfg[k] = mesclar3(baselineAnterior[k], cfg[k], m[k]||[]) || []; });
+    cadastroBaseline = { vagoes: clonarJson(m.vagoes||[]), pacotes: clonarJson(m.pacotes||[]), mapeamentos: clonarJson(m.mapeamentos||[]) };
+  } else {
+    capturarCadastroBaseline();
+  }
+  garantirOrdem();
+}
+let docCfg = null, docMedicao = null;
+function criarDocsSincronizados(){
+  docCfg = criarDocSincronizado("cfg", {
+    obterLocal: cfgParaGravar,
+    aplicarMesclado: aplicarCfgMesclado,
+    aoAtualizar: () => { if(dados.processado || cfg.avancosManuais.length) recalcularTudo(); else atualizarTodaUI(); }
+  });
+  docMedicao = criarDocSincronizado("medicaoUau", {
+    obterLocal: medicaoParaGravar,
+    aplicarMesclado: aplicarMedicaoMesclada,
+    aoAtualizar: () => { renderizarMapeamentoMedicao(); renderizarMedicaoUau(); renderizarPagamentoTab(); }
+  });
+}
+// Puxa alterações de outras pessoas quando ela volta pra aba e de tempos em tempos — mas nunca no
+// meio de uma digitação ou com uma caixa de diálogo aberta (redesenhar a tela ali atrapalharia).
+let ultimaAtualizacaoRemota = 0;
+async function atualizarDadosDeOutrasPessoas(){
+  if(!docCfg || !docMedicao) return;
+  if(document.visibilityState !== "visible") return;
+  const ativo = document.activeElement;
+  if(ativo && /^(INPUT|TEXTAREA|SELECT)$/.test(ativo.tagName)) return;
+  if(document.querySelector(".modal-overlay") || loadingOverlay.classList.contains("ativo")) return;
+  if(Date.now() - ultimaAtualizacaoRemota < 10000) return;
+  ultimaAtualizacaoRemota = Date.now();
+  try{
+    const mudouCfg = await docCfg.atualizarDoServidor();
+    const mudouMedicao = await docMedicao.atualizarDoServidor();
+    if(mudouCfg){ if(dados.processado || cfg.avancosManuais.length) recalcularTudo(); else atualizarTodaUI(); }
+    else if(mudouMedicao){ renderizarMapeamentoMedicao(); renderizarMedicaoUau(); renderizarPagamentoTab(); }
+    if(mudouCfg || mudouMedicao) mostrarToastInfo("Dados atualizados com alterações feitas por outra pessoa.");
+  }catch(e){ console.error("atualizarDadosDeOutrasPessoas", e); }
+}
+window.addEventListener("focus", atualizarDadosDeOutrasPessoas);
+document.addEventListener("visibilitychange", atualizarDadosDeOutrasPessoas);
+setInterval(atualizarDadosDeOutrasPessoas, 90000);
+
 // Multi-obra/multi-usuário (porte pro esquema do Jardins Berlim): cfg agora é lido/gravado por
 // `db` (obras/<obraId>/cfg no Supabase quando hospedado na Vercel; localStorage quando offline —
 // ver createRemoteDb/createLocalDb). Cada obra tem seu próprio cfg, isolado das demais.
 async function carregarConfig(){
   try{
-    const snap = await db.doc("cfg").get();
-    if(snap.exists){
-      const parsed = snap.data() || {};
+    criarDocsSincronizados();
+    let precisaSalvar = false;
+    const parsed = await docCfg.carregar();
+    if(parsed){
+      Object.keys(parsed).forEach(k => { if(!(k in cfg)) cfg[k] = parsed[k]; }); // campo que esta versão do app não conhece: preserva
       cfg.vagoes = parsed.vagoes || [];
       cfg.pacotes = parsed.pacotes || [];
       cfg.mapeamentos = parsed.mapeamentos || [];
@@ -1269,9 +1513,10 @@ async function carregarConfig(){
       cfg.descricoesUau = parsed.descricoesUau || {};
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
+      if(converterVersoesParaDelta()) precisaSalvar = true;
       const nomesCorrigidos = corrigirPacotesOrfaos();
       if(nomesCorrigidos.length){
-        salvarConfig();
+        precisaSalvar = true;
         setTimeout(() => mostrarToast(`⚠️ ${nomesCorrigidos.length} pacote(s) estavam com o vagão desconfigurado e sumiam da Prevision/Completo — movidos pra "OUTROS", já corrigido: ${nomesCorrigidos.join(", ")}.`), 300);
       }
     } else {
@@ -1279,10 +1524,11 @@ async function carregarConfig(){
       cfg.pacotes = JSON.parse(JSON.stringify(SEED_PACOTES));
       cfg.mapeamentos = JSON.parse(JSON.stringify(SEED_MAPEAMENTOS));
       cfg.knownFormularios = [...new Set(SEED_MAPEAMENTOS.map(m=>m.formulario))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-      salvarConfig();
+      precisaSalvar = true;
     }
     garantirOrdem();
     capturarCadastroBaseline();
+    if(precisaSalvar && (!AUTH || MY_ROLE === "planejador")) salvarConfig().catch(()=>{});
   }catch(e){ console.error("Falha ao carregar config salva:", e); }
 }
 
@@ -1447,18 +1693,20 @@ function vagaoOuCriar(nome){
   return vagao;
 }
 
+function avisarFalhaSalvar(e){
+  const msg = e && e.message ? e.message : String(e);
+  if(/HTTP 413/.test(msg)) mostrarToast("⚠️ Não foi possível salvar: os dados ficaram grandes demais pro servidor. Avise quem mantém o app.");
+  else mostrarToast(`⚠️ Falha ao salvar: ${msg} — a alteração pode não ter sido gravada, tente de novo.`);
+}
+
+// Grava o cfg. Uma edição de Cadastro pendente é considerada confirmada a partir daqui (vira a nova
+// baseline) — antes também subia junto, só que a baseline ficava velha e um salvamento seguinte
+// podia desfazer o que já tinha subido. As gravações entram numa fila (ver criarDocSincronizado).
 async function salvarConfig(){
-  try{
-    await db.doc("cfg").set(cfg);
-  }catch(e){
-    mostrarToast(`⚠️ Falha ao salvar: ${e && e.message ? e.message : e} — a alteração pode não ter sido gravada, tente de novo.`);
-    throw e;
-  }
-  // Fora de uma edição de Cadastro pendente, o que acabou de ser salvo JÁ é o novo "último salvo" —
-  // mantém a baseline sempre em dia com ações de commit imediato (resolver pendência, avanço manual,
-  // etc.), senão ela ficaria presa no snapshot antigo e salvarConfigSemCadastroSujo() apagaria essas
-  // ações ao reverter pro baseline na próxima vez que uma edição de Cadastro ficar pendente.
-  if(!cadastroSujo) capturarCadastroBaseline();
+  if(cadastroSujo){ cadastroSujo = false; atualizarBotaoSalvarCadastro(); }
+  capturarCadastroBaseline();
+  try{ await docCfg.salvar(); }
+  catch(e){ avisarFalhaSalvar(e); throw e; }
 }
 
 // Cadastro usa salvamento adiado (edição só grava de verdade quando ela clica "Salvar alterações").
@@ -1474,18 +1722,11 @@ function capturarCadastroBaseline(){
   };
 }
 
+// Marcar OK no Prevision/pagamento não pode arrastar junto uma edição de Cadastro pela metade —
+// cfgParaGravar() já troca vagões/pacotes/serviços pela baseline quando há edição pendente.
 async function salvarConfigSemCadastroSujo(){
-  if(cadastroSujo && cadastroBaseline){
-    const paraSalvar = { ...cfg, vagoes: cadastroBaseline.vagoes, pacotes: cadastroBaseline.pacotes, mapeamentos: cadastroBaseline.mapeamentos };
-    try{
-      await db.doc("cfg").set(paraSalvar);
-    }catch(e){
-      mostrarToast(`⚠️ Falha ao salvar: ${e && e.message ? e.message : e} — a alteração pode não ter sido gravada, tente de novo.`);
-      throw e;
-    }
-    return;
-  }
-  await salvarConfig();
+  try{ await docCfg.salvar(); }
+  catch(e){ avisarFalhaSalvar(e); throw e; }
 }
 
 /* ===================== Estado da importação (não persiste) ===================== */
@@ -1640,9 +1881,35 @@ function ultimaVersaoArquivada(){
   return cfg.versoes.length ? cfg.versoes[cfg.versoes.length - 1] : null;
 }
 
+// VERSÕES EM "DELTA" (2026-09-27): antes, cada "Salvar avanço" guardava a lista COMPLETA de tudo que
+// já estava concluído — o cfg crescia centenas de KB por semana e, passado o limite de ~4,5MB da
+// Vercel, nenhum salvamento funcionaria mais. Agora cada versão guarda só o que entrou NELA (as
+// chaves novas daquela semana); "o que já estava salvo" = a união de todas as versões.
+// converterVersoesParaDelta() transforma as versões antigas (completas) nesse formato no carregamento.
+function uniaoChavesVersoes(ate, campo){
+  const s = new Set();
+  for(let i = 0; i < ate && i < cfg.versoes.length; i++) (cfg.versoes[i][campo] || []).forEach(c => s.add(c));
+  return s;
+}
+function converterVersoesParaDelta(){
+  let mudou = false;
+  ["chaves","chavesServico"].forEach(campo => {
+    const acumulado = new Set();
+    cfg.versoes.forEach(v => {
+      if(!Array.isArray(v[campo])) return;
+      const delta = v[campo].filter(c => !acumulado.has(c));
+      v[campo].forEach(c => acumulado.add(c));
+      if(delta.length !== v[campo].length){ v[campo] = delta; mudou = true; }
+    });
+  });
+  return mudou;
+}
+// cache das uniões — invalidado em recalcularTudo() (toda mudança em cfg.versoes termina num recalcularTudo)
+let cacheBaseline = null;
 function baselineChaves(){
-  const v = ultimaVersaoArquivada();
-  return v ? new Set(v.chaves) : new Set();
+  if(!cacheBaseline) cacheBaseline = {};
+  if(!cacheBaseline.chaves) cacheBaseline.chaves = uniaoChavesVersoes(cfg.versoes.length, "chaves");
+  return cacheBaseline.chaves;
 }
 
 // Equivalente a baselineChaves(), mas em nível de SERVIÇO individual (chaveRegra), não de pacote
@@ -1651,16 +1918,19 @@ function baselineChaves(){
 // existindo só pra Resumo/"o que fechou". Versões salvas antes desse campo existir não têm
 // chavesServico — tratadas como vazio, então nada "antigo" é perdido, só não vira baseline de serviço.
 function baselineChavesServico(){
-  const v = ultimaVersaoArquivada();
-  return v && v.chavesServico ? new Set(v.chavesServico) : new Set();
+  if(!cacheBaseline) cacheBaseline = {};
+  if(!cacheBaseline.chavesServico) cacheBaseline.chavesServico = uniaoChavesVersoes(cfg.versoes.length, "chavesServico");
+  return cacheBaseline.chavesServico;
 }
 
-// Itens que ficaram "novos" numa versão arquivada específica (a diferença entre ela e a anterior).
+// Itens que ficaram "novos" numa versão arquivada específica (o que ela tem e nenhuma anterior tinha).
 function chavesNovasDaVersao(idx){
-  const v = cfg.versoes[idx];
-  const anterior = cfg.versoes[idx-1];
-  const anteriorSet = anterior ? new Set(anterior.chaves) : new Set();
-  return v.chaves.filter(c => !anteriorSet.has(c));
+  const anteriores = uniaoChavesVersoes(idx, "chaves");
+  return (cfg.versoes[idx].chaves || []).filter(c => !anteriores.has(c));
+}
+// Tudo que estava coberto até essa versão (inclusive) — o que a tela "Ver itens" mostra.
+function chavesAcumuladasAteVersao(idx){
+  return [...uniaoChavesVersoes(idx + 1, "chaves")];
 }
 
 /* ===================== Parsing da Hierarquia dos locais ===================== */
@@ -1971,6 +2241,9 @@ function itensCompletoTodasCasas(pacoteId){
 
 /* ===================== Cálculo principal ===================== */
 function recalcularTudo(){
+  cacheBaseline = null;
+  completoPorChave = null;
+  indiceFvsMedicao = null;
   indice = construirIndice();
   avancos = [];
   completoLista = [];
@@ -2028,6 +2301,7 @@ function recalcularTudo(){
         registrosDaRegra.forEach(r => { if(r.data && (!dataRegra || r.data > dataRegra)) dataRegra = r.data; });
         regrasConcluidas.push({
           chave: chaveRegra(pac.id, entrada.casa, entrada.sublocal, regra.formulario, regra.observacao),
+          regraId: regra.id, formulario: regra.formulario,
           pacoteId: pac.id, pacoteNome: pac.nome, vagaoNome: nomeVagao(pac.vagaoId),
           quadra: entrada.quadra, casa: entrada.casa, sublocal: entrada.sublocal,
           servico: rotuloRegra(regra), empresa: empresas.join(" / "), data: dataRegra
@@ -2053,6 +2327,7 @@ function recalcularTudo(){
 
     regrasConcluidas.push({
       chave: chaveRegra(pacote.id, m.casa, item.sublocal, null, m.id),
+      manual: true,
       pacoteId: pacote.id, pacoteNome: pacote.nome, vagaoNome: nomeVagao(pacote.vagaoId),
       quadra: item.quadra, casa: m.casa, sublocal: item.sublocal,
       servico: pacote.nome + " (lançamento manual)", empresa: "", data: item.dataConclusao
@@ -2096,13 +2371,14 @@ function salvarAvancoAtual(){
         abrirModalSubstituirOuSomar(versaoExistente, rotulo, qtd, chavesServicoNovas.length);
         return;
       }
+      const jaSalvas = baselineChaves(), jaSalvasServico = baselineChavesServico();
       cfg.versoes.push({
         id: uid(),
         data: new Date().toISOString(),
         semana: semanaEscolhida,
         rotulo,
-        chaves: avancos.map(chaveAvanco),
-        chavesServico: regrasConcluidas.map(r=>r.chave)
+        chaves: [...new Set(avancos.map(chaveAvanco))].filter(c => !jaSalvas.has(c)),
+        chavesServico: [...new Set(regrasConcluidas.map(r=>r.chave))].filter(c => !jaSalvasServico.has(c))
       });
       salvarConfig();
       recalcularTudo();
@@ -2140,16 +2416,23 @@ function abrirModalSubstituirOuSomar(versaoExistente, rotulo, qtdCompletos, qtdS
         el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
         el("button",{class:"btn secundario pequeno", onclick:()=>{
           fecharModal(overlay);
-          versaoExistente.chaves = [...new Set([...versaoExistente.chaves, ...avancos.map(chaveAvanco)])];
-          versaoExistente.chavesServico = [...new Set([...(versaoExistente.chavesServico||[]), ...regrasConcluidas.map(r=>r.chave)])];
+          const jaSalvas = baselineChaves(), jaSalvasServico = baselineChavesServico();
+          versaoExistente.chaves = [...new Set([...versaoExistente.chaves, ...avancos.map(chaveAvanco).filter(c=>!jaSalvas.has(c))])];
+          versaoExistente.chavesServico = [...new Set([...(versaoExistente.chavesServico||[]), ...regrasConcluidas.map(r=>r.chave).filter(c=>!jaSalvasServico.has(c))])];
           versaoExistente.data = new Date().toISOString();
           salvarConfig(); recalcularTudo();
           mostrarToast(`Dados somados à versão "${versaoExistente.rotulo}".`);
         }},["Somar aos dados já salvos"]),
         el("button",{class:"btn pequeno", onclick:()=>{
           fecharModal(overlay);
-          versaoExistente.chaves = avancos.map(chaveAvanco);
-          versaoExistente.chavesServico = regrasConcluidas.map(r=>r.chave);
+          // "substituir" = essa versão passa a cobrir tudo que está concluído agora e que nenhuma
+          // OUTRA versão já cobre (formato delta, ver converterVersoesParaDelta)
+          const idxExistente = cfg.versoes.indexOf(versaoExistente);
+          const outras = cfg.versoes.filter((_,i)=>i!==idxExistente);
+          const outrasChaves = new Set(outras.flatMap(v=>v.chaves||[]));
+          const outrasServico = new Set(outras.flatMap(v=>v.chavesServico||[]));
+          versaoExistente.chaves = [...new Set(avancos.map(chaveAvanco))].filter(c=>!outrasChaves.has(c));
+          versaoExistente.chavesServico = [...new Set(regrasConcluidas.map(r=>r.chave))].filter(c=>!outrasServico.has(c));
           versaoExistente.data = new Date().toISOString();
           salvarConfig(); recalcularTudo();
           mostrarToast(`Versão "${versaoExistente.rotulo}" substituída pelos dados de agora.`);
@@ -2235,14 +2518,14 @@ function abrirModalTipoResolucao(qtdCasas, onEscolher){
   document.body.appendChild(overlay);
 }
 
-function modalConfirmar(titulo, mensagem, onConfirmar){
+function modalConfirmar(titulo, mensagem, onConfirmar, rotuloConfirmar){
   const overlay = el("div",{class:"modal-overlay"},[
     el("div",{class:"modal-caixa"},[
       el("h4",null,[titulo]),
       el("p",null,[mensagem]),
       el("div",{class:"modal-acoes"},[
         el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
-        el("button",{class:"btn perigo pequeno", onclick:()=>{ fecharModal(overlay); onConfirmar(); }},["Confirmar"])
+        el("button",{class: rotuloConfirmar ? "btn pequeno" : "btn perigo pequeno", onclick:()=>{ fecharModal(overlay); onConfirmar(); }},[rotuloConfirmar || "Confirmar"])
       ])
     ])
   ]);
@@ -2257,6 +2540,25 @@ function mostrarToast(mensagem){
   const toast = el("div",{class:"toast"},[mensagem]);
   wrap.appendChild(toast);
   setTimeout(()=>toast.remove(), 4500);
+}
+// Aviso neutro (não é erro) — o toast padrão é vermelho.
+function mostrarToastInfo(mensagem){
+  let wrap = document.getElementById("toastWrap");
+  if(!wrap){ wrap = el("div",{class:"toast-wrap", id:"toastWrap"}); document.body.appendChild(wrap); }
+  const toast = el("div",{class:"toast neutro"},[mensagem]);
+  wrap.appendChild(toast);
+  setTimeout(()=>toast.remove(), 5500);
+}
+// Aviso com um botão de ação (ex.: "Desfazer") que some sozinho depois de alguns segundos.
+function mostrarToastAcao(mensagem, rotuloBotao, onClick, ms){
+  let wrap = document.getElementById("toastWrap");
+  if(!wrap){ wrap = el("div",{class:"toast-wrap", id:"toastWrap"}); document.body.appendChild(wrap); }
+  const toast = el("div",{class:"toast neutro com-acao"},[
+    el("span",null,[mensagem]),
+    el("button",{onclick:()=>{ toast.remove(); onClick(); }},[rotuloBotao])
+  ]);
+  wrap.appendChild(toast);
+  setTimeout(()=>toast.remove(), ms || 10000);
 }
 
 function baixarCSV(nomeArquivo, cabecalhos, linhas){
@@ -2300,25 +2602,59 @@ function base64ParaArrayBuffer(base64){
   for(let i=0; i<binario.length; i++) bytes[i] = binario.charCodeAt(i);
   return bytes.buffer;
 }
-// A Vercel recusa o corpo da requisicao acima de uns poucos MB — um .xlsx grande, depois de virar
-// base64 (~33% maior), pode passar desse limite. Sem esse aviso, o fetch() abaixo falhava (403/413)
-// em silencio: a planilha parecia ter sido enviada, mas nunca era realmente gravada, e sumia ao
-// recarregar a pagina — foi exatamente o que aconteceu no teste dela.
-const LIMITE_ARQUIVO_CACHE_BYTES = 3 * 1024 * 1024;
-async function salvarArquivoCache(nome, arrayBuffer){
-  if(arrayBuffer.byteLength > LIMITE_ARQUIVO_CACHE_BYTES){
-    mostrarToast(`⚠️ "${nome}" tem ${(arrayBuffer.byteLength/1024/1024).toFixed(1)}MB — grande demais pra ficar salvo compartilhado entre todo mundo (limite ~3MB). Os dados foram processados nesta tela, mas quem recarregar a página (ou outra pessoa) não vai ver esse upload.`);
-    return;
-  }
+// EXPORTAÇÃO SALVA JÁ PROCESSADA (2026-09-27): antes guardava os bytes do .xlsx (limite ~3MB — acima
+// disso, quem recarregasse a página não via o upload) e a página relia/reprocessava a planilha
+// inteira toda vez que abria. Agora guarda os REGISTROS já lidos, compactados (gzip) e divididos em
+// partes pequenas (obras/<id>/mobussPartes/<uploadId>_<n>), com um índice em obras/<id>/mobussAtual.
+// Sem limite de tamanho, e abre bem mais rápido. A gravação é em ordem: primeiro as partes novas,
+// depois o índice apontando pra elas, e só então apaga as partes antigas — antes, a limpeza da
+// exportação antiga rodava junto com o salvamento da nova e podia apagar a nova (mesmo nome de arquivo).
+const TAM_PARTE_MOBUSS = 1500000; // caracteres por parte — bem abaixo do limite de corpo da Vercel
+async function comprimirTexto(txt){
+  if(typeof CompressionStream === "undefined") return null;
+  const stream = new Blob([txt]).stream().pipeThrough(new CompressionStream("gzip"));
+  return arrayBufferParaBase64(await new Response(stream).arrayBuffer());
+}
+async function descomprimirTexto(base64){
+  const stream = new Blob([base64ParaArrayBuffer(base64)]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).text();
+}
+async function salvarExportacaoMobuss(){
+  if(AUTH && MY_ROLE !== "planejador") return;
+  if(!dados.arquivos.length) return; // nenhum arquivo lido com sucesso — não apaga a exportação salva
   try{
-    await db.doc("arquivosMobuss/"+encodeURIComponent(nome)).set({
-      nome, dadosBase64: arrayBufferParaBase64(arrayBuffer), salvoEm: Date.now()
-    });
+    const payload = JSON.stringify({ arquivos: dados.arquivos, registros: dados.registros, semCasa: dados.semCasa });
+    let conteudo = await comprimirTexto(payload), formato = "gzip-json-v1";
+    if(conteudo === null){ conteudo = payload; formato = "json-v1"; }
+    const uploadId = uid();
+    const partes = [];
+    for(let i = 0; i < conteudo.length; i += TAM_PARTE_MOBUSS) partes.push(conteudo.slice(i, i + TAM_PARTE_MOBUSS));
+    for(let i = 0; i < partes.length; i++) await db.doc(`mobussPartes/${uploadId}_${i}`).set({ parte: partes[i] });
+    await db.doc("mobussAtual").set({ uploadId, partes: partes.length, formato, salvoEm: Date.now(), por: CURRENT_USER ? CURRENT_USER.email : null });
+    await apagarPartesMobussExceto(uploadId);
   }catch(e){
-    console.error("Falha ao salvar arquivo em cache:", e);
-    mostrarToast(`⚠️ Falha ao salvar "${nome}" compartilhado: ${e && e.message ? e.message : e}`);
+    console.error("Falha ao salvar exportação MOBUSS:", e);
+    mostrarToast(`⚠️ A exportação foi processada nesta tela, mas não consegui salvar pra todo mundo: ${e && e.message ? e.message : e}`);
   }
 }
+// apaga partes de exportações anteriores e o formato antigo (bytes do .xlsx em arquivosMobuss/)
+async function apagarPartesMobussExceto(uploadIdAtual){
+  try{
+    const partes = await db.collection("mobussPartes").somenteIds().get();
+    await Promise.all(partes.docs.filter(d => !uploadIdAtual || !d.id.startsWith(uploadIdAtual+"_")).map(d => db.doc("mobussPartes/"+d.id).delete()));
+    const antigos = await db.collection("arquivosMobuss").somenteIds().get();
+    // o id já vem codificado do jeito que foi gravado — antes era codificado DE NOVO aqui, e o
+    // arquivo antigo nunca era apagado de verdade quando o nome tinha espaço/acento
+    await Promise.all(antigos.docs.map(d => db.doc("arquivosMobuss/"+d.id).delete()));
+  }catch(e){ console.error("Falha ao limpar exportações MOBUSS antigas:", e); }
+}
+async function apagarExportacaoMobussSalva(){
+  if(AUTH && MY_ROLE !== "planejador") return;
+  try{ await db.doc("mobussAtual").delete(); }catch(e){ console.error(e); }
+  await apagarPartesMobussExceto(null);
+}
+// formato antigo (até 2026-09-27): bytes originais do .xlsx em base64 — só leitura, pra continuar
+// abrindo o que foi salvo antes; o próximo upload já grava no formato novo e apaga estes.
 async function listarArquivosCache(){
   try{
     const snap = await db.collection("arquivosMobuss").get();
@@ -2327,16 +2663,6 @@ async function listarArquivosCache(){
       return { nome: v.nome, dados: base64ParaArrayBuffer(v.dadosBase64), salvoEm: v.salvoEm };
     });
   }catch(e){ console.error("Falha ao ler cache de arquivos:", e); return []; }
-}
-async function removerArquivoCache(nome){
-  try{ await db.doc("arquivosMobuss/"+encodeURIComponent(nome)).delete(); }
-  catch(e){ console.error("Falha ao remover arquivo do cache:", e); }
-}
-async function limparTodoCacheArquivos(){
-  try{
-    const snap = await db.collection("arquivosMobuss").get();
-    await Promise.all(snap.docs.map(d => db.doc("arquivosMobuss/"+encodeURIComponent(d.id)).delete()));
-  }catch(e){ console.error("Falha ao limpar cache de arquivos:", e); }
 }
 
 /* ===================== Upload / Dropzone ===================== */
@@ -2371,21 +2697,19 @@ function tratarNovosArquivos(fileList){
   setTimeout(() => {
     limparTodosOsArquivos();
     let pendentes = arquivos.length;
+    const terminou = () => { pendentes--; if(pendentes === 0) finalizarProcessamento(antesRegras); };
     arquivos.forEach(file => {
       const reader = new FileReader();
       reader.onload = ev => {
         try{
-          const buffer = ev.target.result;
-          const wb = XLSX.read(buffer, { type:"array", cellDates:true });
+          const wb = XLSX.read(ev.target.result, { type:"array", cellDates:true });
           processarArquivo(file.name, wb);
-          salvarArquivoCache(file.name, buffer);
         }catch(err){
           mostrarToast(`Não foi possível ler o arquivo "${file.name}": ${err.message}`);
         }
-        pendentes--;
-        if(pendentes === 0) finalizarProcessamento(antesRegras);
+        terminou();
       };
-      reader.onerror = () => { pendentes--; if(pendentes===0) finalizarProcessamento(antesRegras); };
+      reader.onerror = terminou;
       reader.readAsArrayBuffer(file);
     });
   }, 30);
@@ -2395,12 +2719,32 @@ function limparTodosOsArquivos(){
   dados.arquivos = [];
   dados.registros = [];
   dados.semCasa = [];
-  limparTodoCacheArquivos();
 }
 
-// Roda no carregamento da página: recarrega em segundo plano os arquivos que ficaram salvos em
-// cache da última vez, sem precisar que ela escolha o arquivo de novo.
+// Roda no carregamento da página: recarrega a exportação salva da última vez, sem precisar que ela
+// escolha o arquivo de novo.
 async function restaurarArquivosCache(){
+  let meta = null;
+  try{ const snap = await db.doc("mobussAtual").get(); meta = snap.exists ? snap.data() : null; }
+  catch(e){ console.error("Falha ao ler exportação MOBUSS salva:", e); }
+  if(meta && meta.uploadId){
+    mostrarLoading("Carregando a exportação MOBUSS salva…");
+    try{
+      const snaps = await Promise.all(Array.from({length: meta.partes||0}, (_,i) => db.doc(`mobussPartes/${meta.uploadId}_${i}`).get()));
+      if(snaps.some(s => !s.exists)) throw new Error("parte da exportação não encontrada");
+      const conteudo = snaps.map(s => s.data().parte).join("");
+      const salvo = JSON.parse(meta.formato === "gzip-json-v1" ? await descomprimirTexto(conteudo) : conteudo);
+      const paraData = v => v ? new Date(v) : null;
+      dados.arquivos = (salvo.arquivos||[]).map(a => ({ ...a, dataImportacao: paraData(a.dataImportacao) }));
+      dados.registros = (salvo.registros||[]).map(r => ({ ...r, data: paraData(r.data) }));
+      dados.semCasa = (salvo.semCasa||[]).map(r => ({ ...r, data: paraData(r.data) }));
+      finalizarProcessamento();
+    }catch(e){
+      esconderLoading();
+      mostrarToast(`⚠️ Não consegui abrir a exportação MOBUSS salva (${e && e.message ? e.message : e}) — suba a planilha de novo.`);
+    }
+    return;
+  }
   const cache = await listarArquivosCache();
   if(cache.length === 0) return;
   mostrarLoading(`Recarregando ${cache.length} arquivo(s) salvo(s) anteriormente…`);
@@ -2424,6 +2768,7 @@ async function restaurarArquivosCache(){
 function finalizarProcessamento(antesRegras){
   mostrarLoading("Calculando avanços…");
   setTimeout(() => {
+    const antesConhecidos = cfg.knownFormularios.length + "|" + cfg.knownSublocais.length;
     const setForm = new Set(cfg.knownFormularios);
     dados.registros.forEach(r => setForm.add(r.formulario));
     dados.semCasa.forEach(r => setForm.add(r.formulario));
@@ -2433,7 +2778,8 @@ function finalizarProcessamento(antesRegras){
     dados.registros.forEach(r => { if(r.sublocal) setSub.add(r.sublocal); });
     cfg.knownSublocais = [...setSub].sort((a,b)=>a.localeCompare(b,"pt-BR"));
 
-    salvarConfig();
+    // só grava se apareceu formulário/sublocal novo (antes gravava o cfg inteiro a cada abertura da página)
+    if(antesConhecidos !== cfg.knownFormularios.length + "|" + cfg.knownSublocais.length && (!AUTH || MY_ROLE === "planejador")) salvarConfigSemCadastroSujo().catch(()=>{});
     dados.processado = true;
     recalcularTudo();
     renderizarListaArquivos();
@@ -2441,13 +2787,14 @@ function finalizarProcessamento(antesRegras){
     esconderLoading();
 
     if(antesRegras){
+      salvarExportacaoMobuss();
       const antesChaves = new Set(antesRegras.map(r=>r.chave));
       const depoisChaves = new Set(regrasConcluidas.map(r=>r.chave));
       const novos = [...depoisChaves].filter(c=>!antesChaves.has(c)).length;
       const sumidosRegras = antesRegras.filter(r=>!depoisChaves.has(r.chave));
       let msg = `+${novos} serviço(s) novo(s) desde a última exportação`;
       if(sumidosRegras.length>0) msg += ` · ${sumidosRegras.length} serviço(s) que estavam concluídos sumiram`;
-      mostrarToast(msg);
+      mostrarToastInfo(msg);
       renderizarComparativoUpload(novos, sumidosRegras);
     } else {
       renderizarComparativoUpload(null, null);
@@ -2466,6 +2813,7 @@ function limparDadosDoArquivo(nome){
 function removerArquivo(){
   modalConfirmar("Remover exportação atual", `Remover a exportação MOBUSS atual? Todos os avanços calculados a partir dela vão sumir até você subir uma planilha nova. As marcações de Prevision/pagamento já feitas NÃO são apagadas — se uma exportação equivalente voltar depois, elas reaparecem.`, () => {
     limparTodosOsArquivos();
+    apagarExportacaoMobussSalva();
     renderizarListaArquivos();
     renderizarResumoCarga();
     recalcularTudo();
@@ -2820,6 +3168,24 @@ function corDoVagaoOuPacote(nome){
   const chave = CHAVES_CORES_MACROFLUXO.find(k => normalizado.startsWith(normalizarNomeMacrofluxo(k)));
   return chave ? CORES_MACROFLUXO[chave] : corPorTexto(nome);
 }
+// Texto preto ou branco, o que tiver mais contraste com a cor de fundo (tem cor clara no macrofluxo,
+// tipo o cinza do GESSO INTERNO, onde texto branco sumiria).
+function corTextoSobre(hex){
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex||"");
+  if(!m) return "#fff";
+  const lin = c => { c = parseInt(c,16)/255; return c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); };
+  const L = 0.2126*lin(m[1]) + 0.7152*lin(m[2]) + 0.0722*lin(m[3]);
+  return (1.05/(L+0.05)) >= ((L+0.05)/0.05) ? "#fff" : "#1f2430";
+}
+function estiloCorDoNome(nome){
+  const cor = corDoVagaoOuPacote(nome);
+  return `background:${cor};color:${corTextoSobre(cor)};`;
+}
+// Nome do vagão/pacote dentro de uma caixa na cor do macrofluxo (pedido dela, 2026-09-27: a cor
+// como fundo do nome, não uma sigla colorida ao lado).
+function nomeColorido(nome, grande){
+  return el("span",{class:"nome-colorido"+(grande?" grande":""), style:estiloCorDoNome(nome), title:nome},[nome]);
+}
 function iniciaisTexto(txt){
   const palavras = txt.trim().split(/\s+/).filter(Boolean);
   if(palavras.length === 0) return "?";
@@ -2856,7 +3222,9 @@ function haAvancoNaoArquivado(){
   const chavesServicoNovas = regrasConcluidas.filter(r => !baselineChavesServico().has(r.chave));
   return chavesServicoNovas.length > 0;
 }
+let ignorarAvisoSaida = false; // true logo antes de recarregar a página de propósito (ex.: depois de restaurar um backup)
 window.addEventListener("beforeunload", e => {
+  if(ignorarAvisoSaida) return;
   if(cadastroSujo || haAvancoNaoArquivado()){ e.preventDefault(); e.returnValue = ""; }
 });
 
@@ -2983,7 +3351,7 @@ function construirNoVagao(vagao, pacotesDoVagao, busca){
   const expandido = busca ? true : vagoesExpandidos.has(vagao.id);
   const totalServicos = pacotesDoVagao.reduce((s,p)=>s + cfg.mapeamentos.filter(m=>m.pacoteId===p.id).length, 0);
 
-  const inpNome = el("input",{value:vagao.nome});
+  const inpNome = el("input",{value:vagao.nome, class:"nome-colorido-input", size:String(Math.max(10, vagao.nome.length+2)), style:estiloCorDoNome(vagao.nome)});
   inpNome.addEventListener("click", e=>e.stopPropagation());
   inpNome.addEventListener("change", ()=>{
     vagao.nome = normTexto(inpNome.value).toUpperCase() || vagao.nome;
@@ -2998,7 +3366,6 @@ function construirNoVagao(vagao, pacotesDoVagao, busca){
   const cab = el("div",{class:"no-vagao-cab"},[
     alcaArrastar,
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
     inpNome,
     el("span",{class:"meta-no"},[`${pacotesDoVagao.length} pacote(s) · ${totalServicos} serviço(s)`]),
     el("div",{class:"acoes-no"},[
@@ -3061,7 +3428,7 @@ function construirNoPacote(pac, busca){
   const expandido = busca ? true : pacotesExpandidos.has(pac.id);
   const servicos = cfg.mapeamentos.filter(m=>m.pacoteId===pac.id);
 
-  const inpNome = el("input",{value:pac.nome});
+  const inpNome = el("input",{value:pac.nome, class:"nome-colorido-input", size:String(Math.max(10, pac.nome.length+2)), style:estiloCorDoNome(pac.nome)});
   inpNome.addEventListener("click", e=>e.stopPropagation());
   inpNome.addEventListener("change", ()=>{
     pac.nome = normTexto(inpNome.value) || pac.nome;
@@ -3070,7 +3437,6 @@ function construirNoPacote(pac, busca){
 
   const cab = el("div",{class:"no-pacote-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta pequeno", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`},[iniciaisTexto(pac.nome)]),
     inpNome,
     el("span",{class:"meta-no"},[`${servicos.length} serviço(s)`]),
     el("div",{class:"acoes-no"},[
@@ -3436,7 +3802,7 @@ function renderizarListaVersoes(){
           v.semana ? el("span",{class:"badge info",style:"margin-left:8px;"},[`Semana de ${formatarData(new Date(v.semana+"T00:00:00"))}`]) : null,
           ehAtual ? el("span",{class:"badge azul",style:"margin-left:8px;"},["base atual"]) : null
         ]),
-        el("span",{class:"sub"},[`${new Date(v.data).toLocaleDateString("pt-BR")} · ${novosNaVersao} item(ns) novo(s) nesta versão · ${v.chaves.length} no total`]),
+        el("span",{class:"sub"},[`${new Date(v.data).toLocaleDateString("pt-BR")} · ${novosNaVersao} item(ns) novo(s) nesta versão · ${uniaoChavesVersoes(idxOriginal+1, "chaves").size} no total`]),
         btnVer,
         el("button",{class:"btn perigo pequeno", onclick:()=>excluirVersaoArquivada(v.id)},["Excluir"])
       ]),
@@ -3450,7 +3816,7 @@ function renderizarListaVersoes(){
 // em vez de só confiar na explicação de que "avanço automático só mostra o que é novo desde lá".
 function tabelaItensVersao(idxVersao){
   const LIMITE = 200;
-  const itens = cfg.versoes[idxVersao].chaves.map(chave => {
+  const itens = chavesAcumuladasAteVersao(idxVersao).map(chave => {
     const [pacoteId, casa, sublocal] = chave.split("__");
     const pacote = cfg.pacotes.find(p=>p.id===pacoteId);
     return { pacoteNome: pacote ? pacote.nome : "(pacote removido/renomeado)", casa: casa||"", sublocal: sublocal||"" };
@@ -4218,11 +4584,13 @@ function regraCorrespondeBusca(r, busca){
   return alvo.includes(busca);
 }
 
+let completoPorChave = null; // cache de completoLista por pacote+casa+sublocal (limpo em recalcularTudo)
 // Status do PACOTE (não da regra individual) dono dessa linha — "completo" só quando TODOS os
 // serviços necessários daquele pacote pra essa casa/sublocal já foram feitos, senão "parcial".
 // Usa completoLista (calculado no mesmo recalcularTudo() que gera regrasConcluidas).
 function statusPacoteDaRegra(r){
-  const item = completoLista.find(i => i.pacoteId===r.pacoteId && i.casa===r.casa && i.sublocal===r.sublocal);
+  if(!completoPorChave){ completoPorChave = new Map(); completoLista.forEach(i => { const k = i.pacoteId+"__"+i.casa+"__"+i.sublocal; if(!completoPorChave.has(k)) completoPorChave.set(k, i); }); }
+  const item = completoPorChave.get(r.pacoteId+"__"+r.casa+"__"+r.sublocal);
   return item ? (item.completo ? "completo" : "parcial") : null;
 }
 
@@ -4238,8 +4606,8 @@ function construirArvoreVagao(vagao, pacotesDoVagao, todasFiltradas, busca, esta
   const expandido = busca ? true : estado.vagoes.has(vagao.id);
   const cab = el("div",{class:"no-vagao-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[iniciaisTexto(vagao.nome)]),
-    el("span",{style:"font-weight:700;font-size:13px;flex:1;"},[vagao.nome]),
+    nomeColorido(vagao.nome, true),
+    el("span",{style:"flex:1;"}),
     el("span",{class:"meta-no"},[`${regrasDoVagao.length} serviço(s)`])
   ]);
   cab.addEventListener("click", () => {
@@ -4285,8 +4653,8 @@ function construirArvorePacote(pac, regrasDoPacote, busca, estado, linhaFn, colu
   const expandido = busca ? true : estado.pacotes.has(pac.id);
   const cab = el("div",{class:"no-pacote-cab"},[
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
-    el("span",{class:"avatar-pasta pequeno", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`},[iniciaisTexto(pac.nome)]),
-    el("span",{style:"font-weight:600;font-size:12.5px;flex:1;"},[pac.nome]),
+    nomeColorido(pac.nome),
+    el("span",{style:"flex:1;"}),
     el("span",{class:"meta-no"},[`${regrasDoPacote.length} serviço(s)`]),
     botoesMarcarTodos(regrasDoPacote, marcarTodosFn)
   ]);
@@ -4297,18 +4665,53 @@ function construirArvorePacote(pac, regrasDoPacote, busca, estado, linhaFn, colu
   });
   const no = el("div",{class:"no-pacote"},[cab]);
   if(expandido){
+    // Vagão → Pacote → SERVIÇO → Quadra (pedido dela, 2026-09-27): o serviço vem antes da quadra,
+    // na mesma ordem cadastrada em Gerenciamento de Pacotes.
     const corpo = el("div",{class:"no-pacote-corpo"});
-    const porQuadra = new Map();
-    regrasDoPacote.forEach(r => { if(!porQuadra.has(r.quadra)) porQuadra.set(r.quadra, []); porQuadra.get(r.quadra).push(r); });
-    const quadrasOrdenadas = [...porQuadra.keys()].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
-    quadrasOrdenadas.forEach(quadra => corpo.appendChild(construirArvoreQuadra(quadra, porQuadra.get(quadra), busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn)));
+    const porServico = new Map();
+    regrasDoPacote.forEach(r => { if(!porServico.has(r.servico)) porServico.set(r.servico, []); porServico.get(r.servico).push(r); });
+    const ordemCadastro = colunasServicoDoPacote(pac.id);
+    const servicosOrdenados = [...porServico.keys()].sort((a,b) => {
+      const ia = ordemCadastro.indexOf(a), ib = ordemCadastro.indexOf(b);
+      return (ia<0?9999:ia) - (ib<0?9999:ib) || a.localeCompare(b,"pt-BR");
+    });
+    servicosOrdenados.forEach(servico => corpo.appendChild(construirArvoreServico(pac, servico, porServico.get(servico), busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn)));
     no.appendChild(corpo);
   }
   return no;
 }
 
-function construirArvoreQuadra(quadra, regrasQuadra, busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn){
-  const chave = estado.prefixo+":"+quadra;
+function construirArvoreServico(pac, servico, regrasServico, busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn){
+  const chave = pac.id+"::"+servico;
+  if(!estado.servicos) estado.servicos = new Set();
+  const expandido = busca ? true : estado.servicos.has(chave);
+  const casasUnicas = new Set(regrasServico.map(r=>r.casa));
+  const cab = el("div",{class:"no-servico-cab"},[
+    el("span",{class:"seta"},[expandido?"▾":"▸"]),
+    el("span",{style:"font-weight:700;font-size:12.5px;"},[servico]),
+    el("span",{style:"flex:1;"}),
+    el("span",{class:"meta-no"},[`${casasUnicas.size} casa(s)`]),
+    botoesMarcarTodos(regrasServico, marcarTodosFn)
+  ]);
+  cab.addEventListener("click", () => {
+    if(busca) return;
+    if(estado.servicos.has(chave)) estado.servicos.delete(chave); else estado.servicos.add(chave);
+    rerenderFn();
+  });
+  const no = el("div",{class:"no-servico"},[cab]);
+  if(expandido){
+    const corpo = el("div",{class:"no-servico-corpo"});
+    const porQuadra = new Map();
+    regrasServico.forEach(r => { if(!porQuadra.has(r.quadra)) porQuadra.set(r.quadra, []); porQuadra.get(r.quadra).push(r); });
+    const quadrasOrdenadas = [...porQuadra.keys()].sort((a,b)=>String(a).localeCompare(String(b),"pt-BR",{numeric:true}));
+    quadrasOrdenadas.forEach(quadra => corpo.appendChild(construirArvoreQuadra(quadra, porQuadra.get(quadra), busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn, chave)));
+    no.appendChild(corpo);
+  }
+  return no;
+}
+
+function construirArvoreQuadra(quadra, regrasQuadra, busca, estado, linhaFn, colunas, rerenderFn, marcarTodosFn, escopo){
+  const chave = estado.prefixo+":"+(escopo ? escopo+":" : "")+quadra;
   const expandido = busca ? true : estado.quadras.has(chave);
   const casasUnicas = new Set(regrasQuadra.map(r=>r.casa));
   const cab = el("div",{class:"no-quadra-cab"},[
@@ -4360,6 +4763,50 @@ function linhaPrevisaoRegra(r){
   return tr;
 }
 
+// Pagamento x Medição (2026-09-27): a planilha do UAU já diz em que mês (Data_medicao) cada serviço
+// foi medido — e medido = pago. Em vez de digitar o mês de novo, o app sugere o mês do PRIMEIRO
+// boletim que mediu aquele pacote/serviço naquela casa (casa comparada por quadra+lote, ver
+// chaveCasaNumerica). Só sugere: ela confirma linha a linha ou com "Preencher meses pela medição".
+let sugestoesMesPagamento = null; // reconstruído a cada desenho da aba Pagamento
+function construirSugestoesMesPagamento(){
+  const idx = new Map();
+  const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
+  Object.values(medicaoItens).forEach(it => {
+    const mapa = mapaCodigo.get(it.codigo);
+    if(!mapa || !it.mesMedicao) return;
+    const k = chaveCasaNumerica(it.casa);
+    const chaves = [];
+    if(k.completa) chaves.push("C"+k.completa);
+    if(k.lote) chaves.push("L"+k.lote);
+    chaves.forEach(c => {
+      const chave = c+"__"+mapa.pacoteId+"__"+mapa.servico;
+      if(!idx.has(chave)) idx.set(chave, []);
+      idx.get(chave).push(it);
+    });
+  });
+  sugestoesMesPagamento = idx;
+}
+function sugestaoMesPagamento(r){
+  if(!sugestoesMesPagamento) construirSugestoesMesPagamento();
+  const k = chaveCasaNumerica(r.casa, r.quadra);
+  const sufixo = "__"+r.pacoteId+"__"+r.servico;
+  const lista = k.completa ? sugestoesMesPagamento.get("C"+k.completa+sufixo) : (k.lote ? sugestoesMesPagamento.get("L"+k.lote+sufixo) : null);
+  if(!lista || lista.length === 0) return null;
+  const ordenada = lista.slice().sort((a,b)=>a.mesMedicao.localeCompare(b.mesMedicao));
+  return { mes: ordenada[0].mesMedicao, origem: [...new Set(ordenada.map(it => `Contrato ${it.contrato||"—"} · Boletim ${it.boletim||"—"} (${formatarMesAno(it.mesMedicao)})`))] };
+}
+document.getElementById("btnPreencherMesesMedicao").addEventListener("click", () => {
+  construirSugestoesMesPagamento();
+  const alvo = regrasConcluidas.map(r => ({ r, s: statusDoServico(r.chave).mesPagamento ? null : sugestaoMesPagamento(r) })).filter(x => x.s);
+  if(alvo.length === 0){ mostrarToastInfo("Nenhum serviço sem mês de pagamento tem medição correspondente na Conferência de Medição."); return; }
+  modalConfirmar("Preencher meses pela medição", `Preencher o mês de pagamento de ${alvo.length} serviço(s) com o mês do primeiro boletim que mediu cada um (Conferência de Medição)? Serviços que já têm mês preenchido não são alterados.`, () => {
+    alvo.forEach(({r, s}) => { cfg.statusServico[r.chave] = { ...statusDoServico(r.chave), mesPagamento: s.mes }; });
+    salvarConfigSemCadastroSujo();
+    renderizarPagamentoTab();
+    mostrarToastInfo(`${alvo.length} serviço(s) preenchido(s) com o mês da medição.`);
+  }, "Preencher");
+});
+
 function linhaPagamentoRegra(r){
   const status = statusDoServico(r.chave);
   const tr = el("tr",{class: status.mesPagamento ? "linha-ok" : ""});
@@ -4369,6 +4816,12 @@ function linhaPagamentoRegra(r){
   tr.appendChild(el("td",null,[r.data ? formatarData(r.data) : "—"]));
 
   const badge = el("span",{class:"badge "+(status.mesPagamento?"completo":"info")},[status.mesPagamento ? formatarMesAno(status.mesPagamento) : "Sem pagamento"]);
+  // sugestão vinda da Conferência de Medição (UAU): o mês do primeiro boletim que mediu esse serviço nessa casa
+  const sugestao = status.mesPagamento ? null : sugestaoMesPagamento(r);
+  const btnSugestao = sugestao ? el("button",{class:"btn secundario pequeno", title:"Pela Conferência de Medição: "+sugestao.origem.join("; "), onclick:()=>{
+    atualizarStatusServico(r.chave, { mesPagamento: sugestao.mes });
+    renderizarPagamentoTab();
+  }},[`Usar ${formatarMesAno(sugestao.mes)} (medição)`]) : null;
   const inpMes = el("input",{type:"text", placeholder:"MM/AAAA", style:"width:90px;"});
   inpMes.value = mesAnoParaDigitado(status.mesPagamento);
   inpMes.addEventListener("change", () => {
@@ -4387,7 +4840,7 @@ function linhaPagamentoRegra(r){
     atualizarStatusServico(r.chave, { mesPagamento: normalizado });
     renderizarPagamentoTab();
   });
-  tr.appendChild(el("td",null,[el("div",{style:"display:flex;align-items:center;gap:6px;flex-wrap:wrap;"},[inpMes, badge])]));
+  tr.appendChild(el("td",null,[el("div",{style:"display:flex;align-items:center;gap:6px;flex-wrap:wrap;"},[inpMes, badge, btnSugestao])]));
   return tr;
 }
 
@@ -4461,6 +4914,7 @@ function renderizarPagamentoTab(){
 }
 
 function renderizarPagamentoTabConteudo(){
+  sugestoesMesPagamento = null;
   const pendentes = regrasConcluidas.filter(r => !statusDoServico(r.chave).mesPagamento).length;
   document.getElementById("ctPagamento").textContent = pendentes;
 
@@ -4636,10 +5090,11 @@ let mapeamentosEmEdicao = new Set(); // ids de mapeamentosMedicao com o seletor 
 function linhaMapeamentoMedicao(m){
   const descricao = cfg.descricoesUau[m.codigo];
   const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
-    if(!confirm(`Excluir o mapeamento de "${m.codigo}"? Medições futuras com esse código vão pedir vínculo de novo.`)) return;
-    cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
-    salvarConfig();
-    renderizarMapeamentoMedicao();
+    modalConfirmar("Excluir mapeamento", `Excluir o vínculo do código "${m.codigo}"? Os itens medidos com esse código passam a aparecer como "não vinculado" até você vincular de novo.`, () => {
+      cfg.mapeamentosMedicao = cfg.mapeamentosMedicao.filter(x=>x.id!==m.id);
+      salvarConfigSemCadastroSujo();
+      renderizarMapeamentoMedicao(); renderizarMedicaoUau(); renderizarPagamentoTab();
+    });
   }},["Excluir"]);
 
   if(!mapeamentosEmEdicao.has(m.id)){
@@ -4666,9 +5121,9 @@ function linhaMapeamentoMedicao(m){
     m.pacoteId = selPacote.value;
     popularServicos();
     m.servico = selServico.value;
-    salvarConfig();
+    salvarConfigSemCadastroSujo(); renderizarMedicaoUau();
   });
-  selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfig(); });
+  selServico.addEventListener("change", () => { m.servico = selServico.value; salvarConfigSemCadastroSujo(); renderizarMedicaoUau(); });
   return el("div",{class:"linha-servico"},[
     el("div",{class:"info"},[
       el("div",{class:"servico-nome"},[m.codigo]),
@@ -4690,6 +5145,22 @@ function linhaMapeamentoMedicao(m){
 // pré-selecionada quando a colagem trouxe uma linha de descrição). Vários podem existir ao mesmo
 // tempo (uma colagem pode trazer vários códigos novos de uma vez).
 let rascunhosMapeamentoMedicao = []; // [{codigo, travado, pacoteId, servico, descricao}]
+// Códigos de itens medidos que ainda não têm vínculo viram rascunho automaticamente (inclusive depois de
+// recarregar a página — os itens ficam salvos). "Pular" esconde o rascunho só até recarregar.
+let codigosPuladosMedicao = new Set();
+function sincronizarRascunhosComItensMedidos(){
+  const mapeados = new Set(cfg.mapeamentosMedicao.map(m=>m.codigo));
+  const comRascunho = new Set(rascunhosMapeamentoMedicao.map(r=>r.codigo));
+  const codigos = [...new Set(Object.values(medicaoItens).map(it=>it.codigo))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  codigos.forEach(codigo => {
+    if(mapeados.has(codigo) || comRascunho.has(codigo) || codigosPuladosMedicao.has(codigo)) return;
+    const descricao = cfg.descricoesUau[codigo];
+    const sugestao = sugerirPacoteServico(descricao);
+    rascunhosMapeamentoMedicao.push({ codigo, travado:true, pacoteId: sugestao?sugestao.pacoteId:null, servico: sugestao?sugestao.servico:null, descricao });
+  });
+  // rascunho travado cujo código já foi vinculado (ex.: por outra pessoa) sai da lista
+  rascunhosMapeamentoMedicao = rascunhosMapeamentoMedicao.filter(r => !(r.travado && mapeados.has(r.codigo)));
+}
 
 function linhaRascunhoMapeamento(rascunho){
   const inpCodigo = el("input",{type:"text", placeholder:"Código do UAU (ex.: S00296)", value: rascunho.codigo||"", style:"margin-bottom:4px;"});
@@ -4711,6 +5182,7 @@ function linhaRascunhoMapeamento(rascunho){
   selServico.addEventListener("change", () => { rascunho.servico = selServico.value; });
 
   function remover(){
+    if(rascunho.travado && rascunho.codigo) codigosPuladosMedicao.add(rascunho.codigo);
     rascunhosMapeamentoMedicao = rascunhosMapeamentoMedicao.filter(r=>r!==rascunho);
     renderizarMapeamentoMedicao();
   }
@@ -4720,15 +5192,13 @@ function linhaRascunhoMapeamento(rascunho){
     if(cfg.mapeamentosMedicao.some(m=>m.codigo===codigo)){ mostrarToast(`"${codigo}" já está mapeado.`); return; }
     if(!rascunho.pacoteId || !rascunho.servico){ mostrarToast("Escolha o pacote e o serviço antes de confirmar o código."); return; }
     cfg.mapeamentosMedicao.push({ id: uid(), codigo, pacoteId: rascunho.pacoteId, servico: rascunho.servico });
-    salvarConfig();
+    salvarConfigSemCadastroSujo();
     remover();
-    // se essa colagem tinha itens desse código esperando (ver processarColagemMedicaoUau), já
-    // libera eles agora, sem precisar colar de novo.
-    if(ultimaTabelaColadaPendente){
-      const { novos, atualizados } = aplicarItensDaTabela(ultimaTabelaColadaPendente);
-      if(novos || atualizados){ salvarMedicaoUau(); renderizarMedicaoUau(); }
-    }
-    mostrarToast(`"${codigo}" mapeado.`);
+    // os itens medidos desse código já estão salvos (entram mesmo sem vínculo) — só redesenha pra
+    // eles passarem a conferir contra a FVS.
+    renderizarMedicaoUau();
+    renderizarPagamentoTab();
+    mostrarToastInfo(`"${codigo}" mapeado.`);
   }
   const linhaBotoes = el("div",{style:"display:flex;flex-direction:column;gap:4px;"},[
     el("button",{class:"btn pequeno", onclick:confirmar},["Vincular"]),
@@ -4743,6 +5213,7 @@ function linhaRascunhoMapeamento(rascunho){
 function renderizarMapeamentoMedicao(){
   const area = document.getElementById("listaMapeamentoMedicao");
   if(!area) return;
+  sincronizarRascunhosComItensMedidos();
   area.innerHTML = "";
   if(cfg.mapeamentosMedicao.length === 0 && rascunhosMapeamentoMedicao.length === 0){
     area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
@@ -4808,15 +5279,76 @@ document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", ()
       não necessariamente é escrito igual ao do UAU (ex.: "16-12" vs "QD16LT12").
    Todos os itens ficam salvos (obras/<obraId>/medicaoUau), compartilhado com o time — não precisa
    recolar toda vez que alguém abrir a página. */
-// Extrai só o número do lote/casa pra comparar — tanto do formato do UAU ("QD16LT12" -> pega o
-// SEGUNDO grupo de dígitos, "12") quanto de como o MOBUSS/FVS já guarda "casa" (só um número, tipo
-// "12", sem quadra — ver construirIndice(), que já indexa só por casa+sublocal, nunca por quadra).
-// Achado real testando com dados simulados: comparar exigindo quadra+lote juntos nunca dava certo,
-// porque o lado da FVS nunca tem a quadra dentro do valor de "casa" pra começo de conversa.
-function extrairLote(casaTexto){
-  const nums = String(casaTexto||"").match(/\d+/g);
-  if(!nums || nums.length === 0) return null;
-  return (nums.length >= 2 ? nums[1] : nums[0]).replace(/^0+/,"") || "0";
+// Identidade numérica de uma casa, pra comparar MOBUSS x UAU mesmo escritas diferente (2026-09-27).
+// Antes comparava SÓ o número do lote — "QD16LT12" e "QD17LT12" viravam os dois "12" e se misturavam
+// quando o número da casa se repete entre quadras. Agora usa quadra+lote sempre que der pra saber a
+// quadra: do UAU ("QD16LT12" -> "16-12"), do MOBUSS pela própria casa ("16-12") ou, se a casa vier
+// só com o número ("12"), pela quadra do registro ("QUADRA 16"). Quando não há quadra numérica de um
+// dos lados, cai pra comparação só pelo lote (comportamento antigo), marcado com "L:".
+function chaveCasaNumerica(casaTexto, quadraTexto){
+  const n = s => String(parseInt(s, 10));
+  const nums = String(casaTexto||"").match(/\d+/g) || [];
+  if(nums.length >= 2) return { completa: n(nums[0])+"-"+n(nums[1]), lote: n(nums[1]) };
+  if(nums.length === 1){
+    const q = String(quadraTexto||"").match(/\d+/);
+    return { completa: q ? n(q[0])+"-"+n(nums[0]) : null, lote: n(nums[0]) };
+  }
+  return { completa: null, lote: null };
+}
+
+// Índice de FVS pra Conferência de Medição, montado uma vez por cálculo (antes cada item medido
+// varria a lista inteira de serviços concluídos — com muitos itens colados, a tela travava):
+//   casas: chave numérica -> {casa (texto do MOBUSS), sublocais:Set}
+//   feitos: casa MOBUSS + "__" + pacoteId -> Set(ids das regras cumpridas; "*" = avanço manual do pacote)
+let indiceFvsMedicao = null;
+function obterIndiceFvsMedicao(){
+  if(indiceFvsMedicao) return indiceFvsMedicao;
+  const casasPorChave = new Map(), casasPorLote = new Map(), sublocaisPorCasa = new Map();
+  function registrarCasa(casa, quadra, sublocal){
+    const k = chaveCasaNumerica(casa, quadra);
+    if(k.completa){ if(!casasPorChave.has(k.completa)) casasPorChave.set(k.completa, casa); }
+    else if(k.lote && !casasPorLote.has(k.lote)) casasPorLote.set(k.lote, casa);
+    if(!sublocaisPorCasa.has(casa)) sublocaisPorCasa.set(casa, new Set());
+    if(sublocal) sublocaisPorCasa.get(casa).add(sublocal);
+  }
+  if(indice) indice.forEach(e => registrarCasa(e.casa, e.quadra, e.sublocal));
+  cfg.avancosManuais.forEach(m => registrarCasa(m.casa, (m.casa||"").split("-")[0], m.sublocal));
+  const feitos = new Map();
+  regrasConcluidas.forEach(r => {
+    const k = r.casa+"__"+r.pacoteId;
+    if(!feitos.has(k)) feitos.set(k, new Set());
+    feitos.get(k).add(r.manual ? "*" : r.regraId);
+  });
+  indiceFvsMedicao = { casasPorChave, casasPorLote, sublocaisPorCasa, feitos };
+  return indiceFvsMedicao;
+}
+// casa do UAU -> casa como o MOBUSS escreve (ou null se essa casa não tem nenhum registro de FVS)
+function casaMobussDoItem(casaUau){
+  const idx = obterIndiceFvsMedicao();
+  const k = chaveCasaNumerica(casaUau);
+  return (k.completa && idx.casasPorChave.get(k.completa)) || (k.lote && idx.casasPorLote.get(k.lote)) || null;
+}
+// Um item medido só está "Com FVS" quando TODAS as FVS daquele serviço estão Encerradas naquela casa
+// (2026-09-27 — antes bastava UMA: "ACABAMENTOS FINAIS" = Louças + Metais + Limpeza aparecia verde
+// com só a Limpeza feita). FVS de um sublocal específico só contam se a casa tem esse sublocal no
+// MOBUSS (casa térrea não fica pendente de FVS do pavimento superior). Devolve também quais faltam.
+function situacaoFvsItem(casaUau, mapa){
+  if(!mapa) return { comFvs:false, faltando:[], motivo:"código não vinculado a nenhum pacote/serviço" };
+  const k = chaveCasaNumerica(casaUau);
+  if(!k.lote) return { comFvs:false, faltando:[], motivo:"casa não reconhecida (esperado tipo QD16LT12)" };
+  const idx = obterIndiceFvsMedicao();
+  const casaMobuss = casaMobussDoItem(casaUau);
+  const regrasDoServico = cfg.mapeamentos.filter(m => m.pacoteId===mapa.pacoteId && rotuloRegra(m)===mapa.servico);
+  const sublocaisCasa = casaMobuss ? (idx.sublocaisPorCasa.get(casaMobuss) || new Set()) : new Set();
+  let necessarias = regrasDoServico.filter(m => (!casaMobuss || regraCombinaCasa(m, {casa:casaMobuss})) && (!m.sublocal || sublocaisCasa.has(m.sublocal)));
+  if(necessarias.length === 0) necessarias = regrasDoServico;
+  const feitos = casaMobuss ? (idx.feitos.get(casaMobuss+"__"+mapa.pacoteId) || new Set()) : new Set();
+  if(feitos.has("*")) return { comFvs:true, faltando:[], motivo:"" };
+  const faltandoRegras = necessarias.filter(m => !feitos.has(m.id));
+  const faltando = [...new Set(faltandoRegras.map(m=>m.formulario).filter(Boolean))];
+  if(necessarias.length > 0 && faltandoRegras.length === 0) return { comFvs:true, faltando:[], motivo:"" };
+  const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
+  return { comFvs:false, faltando, motivo: `FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não Encerrada` };
 }
 // Acha cada coluna pelo NOME normalizado do cabeçalho (maiúsculo, sem acento, só A-Z0-9) em vez de
 // pela posição — a consulta é sempre a mesma, mas colunas extras/reordenadas não devem quebrar o
@@ -4883,7 +5415,7 @@ function parseTabelaColada(texto){
   const dados = linhas.slice(1).map(cols => {
     const casa = (cols[colunas.casa]||"").trim();
     return {
-      casa, lote: extrairLote(casa),
+      casa,
       codigo: (cols[colunas.codigo]||"").trim(),
       descricao: (cols[colunas.descricao]||"").trim(),
       contrato: (cols[colunas.contrato]||"").trim(),
@@ -4969,14 +5501,14 @@ function chaveMedicaoItem(casa, codigo, contrato, boletim){
   return normTexto(casa).toUpperCase()+"__"+codigo+"__"+(contrato||"")+"__"+(boletim||"");
 }
 
-// Aplica os itens de uma tabela já colada em medicaoItens — só os códigos JÁ MAPEADOS entram; os
-// que ainda não têm pacote/serviço ficam de fora até ela resolver o rascunho correspondente (ver
-// linhaRascunhoMapeamento), que reaplica essa mesma tabela na hora de confirmar, sem precisar colar
-// de novo.
+// Aplica os itens de uma tabela já colada em medicaoItens. Desde 2026-09-27 TODAS as linhas entram,
+// inclusive as de código ainda não vinculado a pacote/serviço — antes elas eram descartadas sem
+// aviso (sumiam do total da medição, do "Valor por casa" e do cruzamento de Pagamento) e, se a
+// página recarregasse antes do vínculo, era preciso colar tudo de novo. Agora ficam salvas como
+// "não vinculado" e passam a conferir sozinhas assim que o código é vinculado.
 function aplicarItensDaTabela(tabela){
-  let novos = 0, atualizados = 0;
+  let novos = 0, atualizados = 0, semVinculo = 0;
   tabela.linhas.forEach(linha => {
-    if(!cfg.mapeamentosMedicao.some(m=>m.codigo===linha.codigo)) return;
     const bruto = linha.bruto;
     if(!bruto || bruto === "-") return;
     const valor = parseFloat(bruto.replace(/\./g,"").replace(",","."));
@@ -4988,39 +5520,34 @@ function aplicarItensDaTabela(tabela){
       contrato: linha.contrato, boletim: linha.boletim, empresa: linha.empresa, mesMedicao: linha.mesMedicao,
       atualizadoEm: new Date().toISOString(), atualizadoPor: CURRENT_USER?CURRENT_USER.email:null
     };
+    if(!cfg.mapeamentosMedicao.some(m=>m.codigo===linha.codigo)) semVinculo++;
     if(atual) atualizados++; else novos++;
   });
-  return { novos, atualizados };
+  return { novos, atualizados, semVinculo };
 }
 
-let ultimaTabelaColadaPendente = null; // guarda a última colagem — reaplicada quando um rascunho de código é confirmado
 async function processarColagemMedicaoUau(){
   const texto = document.getElementById("colaMedicaoUau").value;
   if(!texto.trim()){ mostrarToast("Cole a tabela copiada da planilha de consulta antes de processar."); return; }
   const tabela = parseTabelaColada(texto);
   if(tabela.erro){ mostrarToast(tabela.erro); return; }
-  ultimaTabelaColadaPendente = tabela;
   // guarda a descrição de cada código (mesmo dos já mapeados) — fica disponível na tabela de
   // resultados e em colagens futuras que não tragam a linha de descrição de novo.
   let novasDescricoes = false;
   Object.entries(tabela.descricoes).forEach(([codigo, desc]) => {
     if(cfg.descricoesUau[codigo] !== desc){ cfg.descricoesUau[codigo] = desc; novasDescricoes = true; }
   });
-  if(novasDescricoes) await salvarConfig();
+  if(novasDescricoes) await salvarConfigSemCadastroSujo();
   const faltando = codigosNaoMapeados(tabela.codigos);
-  faltando.forEach(codigo => {
-    if(rascunhosMapeamentoMedicao.some(r=>r.codigo===codigo)) return; // já tem rascunho pendente pra esse código
-    const descricao = tabela.descricoes[codigo] || cfg.descricoesUau[codigo];
-    const sugestao = sugerirPacoteServico(descricao);
-    rascunhosMapeamentoMedicao.push({ codigo, travado:true, pacoteId: sugestao?sugestao.pacoteId:null, servico: sugestao?sugestao.servico:null, descricao });
-  });
-  const { novos, atualizados } = aplicarItensDaTabela(tabela);
+  const { novos, atualizados, semVinculo } = aplicarItensDaTabela(tabela);
   await salvarMedicaoUau();
   document.getElementById("colaMedicaoUau").value = "";
+  indiceFvsMedicao = null;
   renderizarMapeamentoMedicao();
   renderizarMedicaoUau();
-  const avisoNovosCodigos = faltando.length ? ` ${faltando.length} código(s) novo(s) — mapeie ali embaixo em "Análise por item de contrato".` : "";
-  mostrarToast(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
+  renderizarPagamentoTab();
+  const avisoNovosCodigos = faltando.length ? ` ${faltando.length} código(s) novo(s) (${semVinculo} linha(s)) ainda sem vínculo — já ficaram salvos; vincule em "Análise por item de contrato" que eles passam a conferir sozinhos.` : "";
+  mostrarToastInfo(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
 }
 
 // Não guarda mais pago/fornecedor pago/data de pagamento à parte — isso ficou obsoleto assim que a
@@ -5032,36 +5559,31 @@ let medicaoItens = {}; // { [chaveMedicaoItem]: {casa, codigo, valor, contrato, 
 // um é uma medição/conferência separada). Chave = contrato+"__"+boletim (ver chaveMedicao).
 let medicoesEmEspera = new Set();
 let medicoesValidadas = new Set();
+// Pares casa×código marcados "não se aplica" no passo 2 (Pagamento) — serviço que não existe
+// naquela casa, pra não ficar acusando falta pra sempre. Chave = chaveCasaCodigoMedicao().
+let medicaoNaoSeAplica = new Set();
 function chaveMedicao(contrato, boletim){ return (contrato||"")+"__"+(boletim||""); }
+function chaveCasaCodigoMedicao(casa, codigo){ return normTexto(casa).toUpperCase()+"__"+codigo; }
+function medicaoParaGravar(){
+  return { itens: medicaoItens, medicoesEmEspera: [...medicoesEmEspera], medicoesValidadas: [...medicoesValidadas], naoSeAplica: [...medicaoNaoSeAplica] };
+}
+function aplicarMedicaoMesclada(d){
+  d = d || {};
+  medicaoItens = d.itens || {};
+  medicoesEmEspera = new Set(d.medicoesEmEspera || []);
+  medicoesValidadas = new Set(d.medicoesValidadas || []);
+  medicaoNaoSeAplica = new Set(d.naoSeAplica || []);
+}
 async function carregarMedicaoUau(){
   try{
-    const snap = await db.doc("medicaoUau").get();
-    const dados = snap.exists ? snap.data() : {};
-    medicaoItens = dados.itens || {};
-    medicoesEmEspera = new Set(dados.medicoesEmEspera || []);
-    medicoesValidadas = new Set(dados.medicoesValidadas || []);
-  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); medicaoItens = {}; medicoesEmEspera = new Set(); medicoesValidadas = new Set(); }
+    aplicarMedicaoMesclada(await docMedicao.carregar());
+  }catch(e){ console.error("Falha ao carregar conferência de medição:", e); aplicarMedicaoMesclada({}); }
 }
 async function salvarMedicaoUau(){
-  try{ await db.doc("medicaoUau").set({ itens: medicaoItens, medicoesEmEspera: [...medicoesEmEspera], medicoesValidadas: [...medicoesValidadas] }); }
-  catch(e){ mostrarToast("⚠️ Falha ao salvar a conferência compartilhada: "+(e&&e.message?e.message:e)); }
+  try{ await docMedicao.salvar(); }
+  catch(e){ avisarFalhaSalvar(e); }
 }
 
-// Pra uma casa (quadra+lote) e um pacoteId+servico, existe algum registro de FVS concluído que bate?
-// Casa aqui é comparada só pelos números de quadra/lote (ver extrairLote) — o texto exato de
-// "casa" pode ser escrito diferente entre MOBUSS e UAU.
-function temFvsConcluida(lote, pacoteId, servico){
-  return regrasConcluidas.some(r => r.pacoteId === pacoteId && r.servico === servico && extrairLote(r.casa) === lote);
-}
-
-// Nome(s) do Formulário FVS que falta(m) pra fechar um pacote/serviço — ela precisa disso pra avisar
-// o responsável e ele achar a FVS certa no MOBUSS pra regularizar (o rótulo "servico" sozinho não
-// basta, o formulário pode ter um nome bem diferente do rótulo). Reaproveita formulariosDoRotulo,
-// já usado pra achar o mesmo tipo de correspondência no Completo.
-function formulariosFaltandoDoItem(mapa){
-  if(!mapa) return [];
-  return formulariosDoRotulo(mapa.pacoteId, mapa.servico).filter(Boolean);
-}
 
 // Valor de exibição/filtro de uma coluna filtrável — o mesmo texto usado tanto pra listar as opções
 // do filtro quanto pra decidir se uma linha passa nele.
@@ -5117,32 +5639,50 @@ function itensFiltradosMedicao(enriquecidos, busca, ignorarColuna){
   });
 }
 
+// Célula "Situação FVS" — mostra em "Falta:" só os Formulários FVS que realmente faltam naquela casa
+// (antes listava todos os formulários do serviço, inclusive os já Encerrados).
+function celulaSituacaoMedicao(item){
+  if(item.comFvs) return el("span",{class:"badge completo"},["Com FVS"]);
+  return el("div",null,[
+    el("span",{class:"badge pendente"},["Sem FVS"]),
+    item.faltando && item.faltando.length ? el("div",{class:"sub",style:"margin-top:3px;font-size:11px;line-height:1.3;"},[`Falta: ${item.faltando.join(", ")}`]) : null
+  ]);
+}
+
+// Exclusões na Conferência de Medição: em vez de uma caixa "tem certeza?" do navegador, apaga na hora
+// e oferece "Desfazer" por alguns segundos (2026-09-27). O desfazer devolve só o que foi apagado —
+// não desfaz nada que outra pessoa tenha feito nesse meio tempo.
+function excluirItensMedicaoComDesfazer(chavesItens, chavesMedicao, mensagem){
+  const removidos = chavesItens.filter(k => medicaoItens[k]).map(k => [k, medicaoItens[k]]);
+  const tiradosEspera = chavesMedicao.filter(c => medicoesEmEspera.has(c));
+  const tiradosValidados = chavesMedicao.filter(c => medicoesValidadas.has(c));
+  removidos.forEach(([k]) => delete medicaoItens[k]);
+  chavesMedicao.forEach(c => { medicoesEmEspera.delete(c); medicoesValidadas.delete(c); });
+  salvarMedicaoUau();
+  renderizarMedicaoUau(); renderizarMapeamentoMedicao(); renderizarPagamentoTab();
+  mostrarToastAcao(mensagem, "Desfazer", () => {
+    removidos.forEach(([k,v]) => { medicaoItens[k] = v; });
+    tiradosEspera.forEach(c => medicoesEmEspera.add(c));
+    tiradosValidados.forEach(c => medicoesValidadas.add(c));
+    salvarMedicaoUau();
+    renderizarMedicaoUau(); renderizarMapeamentoMedicao(); renderizarPagamentoTab();
+    mostrarToastInfo("Exclusão desfeita.");
+  });
+}
+
 // Uma linha da tabela de itens — usada tanto na tabela geral (todos os contratos) quanto na aba
-// "Itens" da conferência de um contrato específico.
+// "Itens" da conferência de uma medição específica.
 function linhaItemMedicaoTr(item){
   const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
-  const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
-    if(!confirm(`Excluir o item "${item.casa} / ${item.codigo}"? Isso não desfaz — se ainda estiver na tabela colada, colar de novo recria ele.`)) return;
-    delete medicaoItens[item.chave];
-    salvarMedicaoUau();
-    renderizarMedicaoUau();
-  }},["Excluir"]);
-  let celulaSituacao;
-  if(item.comFvs){
-    celulaSituacao = el("span",{class:"badge completo"},["Com FVS"]);
-  } else {
-    const faltando = formulariosFaltandoDoItem(item.mapa);
-    celulaSituacao = el("div",null,[
-      el("span",{class:"badge pendente"},["Sem FVS"]),
-      faltando.length ? el("div",{class:"sub",style:"margin-top:3px;font-size:11px;line-height:1.3;"},[`Falta: ${faltando.join(", ")}`]) : null
-    ]);
-  }
+  const btnExcluir = (MY_ROLE === "planejador" || !AUTH) ? el("button",{class:"btn perigo pequeno", title:"Excluir este item (dá pra desfazer logo em seguida)", onclick:()=>{
+    excluirItensMedicaoComDesfazer([item.chave], [], `Item "${item.casa} / ${item.codigo}" excluído.`);
+  }},["Excluir"]) : null;
   return el("tr",null,[
     el("td",null,[item.casa]), el("td",null,[item.codigo]),
     el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
     el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
     el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-    el("td",null,[celulaSituacao]),
+    el("td",null,[celulaSituacaoMedicao(item)]),
     el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]),
     el("td",null,[item.mesMedicao ? formatarMesAno(item.mesMedicao) : "—"]),
     el("td",null,[item.empresa||"—"]),
@@ -5150,13 +5690,33 @@ function linhaItemMedicaoTr(item){
   ]);
 }
 
-/* ---- Conferência por contrato: ela pediu uma sequência tipo a do Avanço Físico — escolhe um
-   contrato numa lista navegável, e confere em 3 passos: 1) itens (tem FVS?), 2) pagamento (algum
-   código do contrato ficou de fora de alguma casa?), 3) valor pago por casa. ---- */
+// Exportação da medição (2026-09-27) — mesma lista que está na tela, ou só o que está "Sem FVS"
+// ordenado por empresa, pronto pra mandar pra cada responsável regularizar no MOBUSS.
+function exportarItensMedicaoCSV(nomeArquivo, itens){
+  const ordenados = itens.slice().sort((a,b)=>
+    (a.empresa||"").localeCompare(b.empresa||"","pt-BR") ||
+    (a.contrato||"").localeCompare(b.contrato||"","pt-BR",{numeric:true}) ||
+    (a.boletim||"").localeCompare(b.boletim||"","pt-BR",{numeric:true}) ||
+    a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
+  baixarCSV(nomeArquivo,
+    ["Empresa","Contrato","Boletim","Mes medicao","Casa","Codigo","Descricao UAU","Pacote","Servico","Situacao FVS","FVS faltando","Valor"],
+    ordenados.map(it => {
+      const pacote = it.mapa && cfg.pacotes.find(p=>p.id===it.mapa.pacoteId);
+      return [it.empresa||"", it.contrato||"", it.boletim||"", it.mesMedicao?formatarMesAno(it.mesMedicao):"", it.casa, it.codigo,
+        cfg.descricoesUau[it.codigo]||"", pacote?pacote.nome:"", it.mapa?it.mapa.servico:"(não vinculado)",
+        it.comFvs?"Com FVS":"Sem FVS", (it.faltando||[]).join(" | "), it.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})];
+    })
+  );
+}
+
+/* ---- Conferência por medição: ela pediu uma sequência tipo a do Avanço Físico — escolhe uma
+   medição (contrato+boletim) numa lista navegável, e confere em 3 passos: 1) itens (tem FVS?),
+   2) pagamento (algum código da medição ficou de fora de alguma casa?), 3) valor pago por casa. ---- */
 let contratoSelecionadoMedicao = null; // null = mostra a lista de medições; senão, {contrato, boletim} da medição aberta
 let abaContratoMedicao = "itens"; // "itens" | "pagamento" | "valor"
 let buscaContratosMedicao = "";
 let buscaItensContratoMedicao = "";
+const renderizarMedicaoUauAtrasado = debounce(() => renderizarMedicaoUau(), 200);
 
 // Lista de MEDIÇÕES navegável (uma por contrato+boletim, não por contrato inteiro) — ela corrigiu:
 // a rotina dela confere boletim a boletim, um contrato tem vários boletins ao longo do tempo e cada
@@ -5174,8 +5734,8 @@ function renderizarListaContratosMedicao(area, enriquecidos){
   if(medicoes.length === 0) return;
 
   area.appendChild(el("h4",{style:"margin:14px 0 6px;"},["Medições"]));
-  const inpBuscaContrato = el("input",{type:"text", placeholder:"Buscar contrato, boletim ou empresa…", value: buscaContratosMedicao, style:"width:100%;max-width:360px;margin-bottom:10px;"});
-  inpBuscaContrato.addEventListener("input", () => { buscaContratosMedicao = inpBuscaContrato.value; renderizarMedicaoUau(); });
+  const inpBuscaContrato = el("input",{type:"text", "data-foco":"buscaContratosMedicao", placeholder:"Buscar contrato, boletim ou empresa…", value: buscaContratosMedicao, style:"width:100%;max-width:360px;margin-bottom:10px;"});
+  inpBuscaContrato.addEventListener("input", () => { buscaContratosMedicao = inpBuscaContrato.value; renderizarMedicaoUauAtrasado(); });
   area.appendChild(inpBuscaContrato);
 
   const busca = buscaContratosMedicao.trim().toLowerCase();
@@ -5212,11 +5772,11 @@ function renderizarListaContratosMedicao(area, enriquecidos){
   }
 }
 
-// Aba 1: os itens desse contrato, igual à tabela geral mas já filtrada — só com busca livre (sem os
-// filtros de coluna tipo Excel, que aqui já não fazem falta — o contrato já reduziu bastante a lista).
+// Aba 1: os itens dessa medição, igual à tabela geral mas já filtrada — só com busca livre (sem os
+// filtros de coluna tipo Excel, que aqui já não fazem falta — a medição já reduziu bastante a lista).
 function renderizarAbaItensContrato(area, itensContrato){
-  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, mês ou empresa…", value: buscaItensContratoMedicao, style:"min-width:300px;margin-bottom:10px;"});
-  inpBusca.addEventListener("input", () => { buscaItensContratoMedicao = inpBusca.value; renderizarMedicaoUau(); });
+  const inpBusca = el("input",{type:"text", "data-foco":"buscaItensContratoMedicao", placeholder:"Buscar casa, código, pacote/serviço, mês ou empresa…", value: buscaItensContratoMedicao, style:"min-width:300px;margin-bottom:10px;"});
+  inpBusca.addEventListener("input", () => { buscaItensContratoMedicao = inpBusca.value; renderizarMedicaoUauAtrasado(); });
   area.appendChild(inpBusca);
 
   const busca = buscaItensContratoMedicao.trim().toLowerCase();
@@ -5237,42 +5797,71 @@ function renderizarAbaItensContrato(area, itensContrato){
   ]));
 }
 
-// Aba 2: pagamento — pra cada casa DESSA MEDIÇÃO (contrato+boletim), os códigos que já apareceram
-// nela ("os itens que ela informou que fazem parte do contrato") que NÃO aparecem nessa casa viram
-// um alerta. É o cruzamento que faltava: hoje só se conferia se o que foi pago tem FVS, não se TODOS
-// os itens da medição estão sendo pagos em TODAS as casas dela.
-function renderizarAbaPagamentoContrato(area, itensContrato){
+// Aba 2: pagamento — pra cada casa DESSA MEDIÇÃO (contrato+boletim), os códigos que aparecem nela
+// e NÃO aparecem nessa casa. Desde 2026-09-27 separa três situações, pra não dar falso alarme:
+//   • faltando de verdade: esse código nunca foi medido pra essa casa, em nenhum boletim;
+//   • já medido em outro boletim: foi pago pra essa casa, só que em outra medição — informativo;
+//   • não se aplica: ela marcou que esse serviço não existe nessa casa (fica salvo).
+function renderizarAbaPagamentoContrato(area, itensContrato, todosEnriquecidos, chaveMedicaoAtual){
   const codigosContrato = [...new Set(itensContrato.map(it=>it.codigo))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
   const casas = [...new Set(itensContrato.map(it=>it.casa))].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
   if(codigosContrato.length < 2){
-    area.appendChild(el("div",{class:"msg-vazio"},["Só tem um código medido nesse contrato até agora — nada pra cruzar ainda. Assim que mais códigos aparecerem, essa aba mostra quais casas ficaram de fora de cada um."]));
+    area.appendChild(el("div",{class:"msg-vazio"},["Só tem um código medido nessa medição até agora — nada pra cruzar ainda. Assim que mais códigos aparecerem, essa aba mostra quais casas ficaram de fora de cada um."]));
     return;
   }
-  let casasCompletas = 0;
+  const medidoEmOutra = new Map(); // casa×código -> Set("Contrato X · Boletim Y") de OUTRAS medições
+  todosEnriquecidos.forEach(it => {
+    if(chaveMedicao(it.contrato, it.boletim) === chaveMedicaoAtual) return;
+    const k = chaveCasaCodigoMedicao(it.casa, it.codigo);
+    if(!medidoEmOutra.has(k)) medidoEmOutra.set(k, new Set());
+    medidoEmOutra.get(k).add(`Contrato ${it.contrato||"—"} · Boletim ${it.boletim||"—"}`);
+  });
+  function alternarNaoSeAplica(casa, codigo){
+    const k = chaveCasaCodigoMedicao(casa, codigo);
+    if(medicaoNaoSeAplica.has(k)) medicaoNaoSeAplica.delete(k); else medicaoNaoSeAplica.add(k);
+    salvarMedicaoUau(); renderizarMedicaoUau();
+  }
+  const descr = cod => `${cod} (${cfg.descricoesUau[cod]||"sem descrição"})`;
+  let casasCompletas = 0, totalOutro = 0;
   const linhas = casas.map(casa => {
     const codigosDaCasa = new Set(itensContrato.filter(it=>it.casa===casa).map(it=>it.codigo));
-    const faltando = codigosContrato.filter(cod=>!codigosDaCasa.has(cod));
+    const faltando = [], emOutro = [], naoAplica = [];
+    codigosContrato.filter(cod=>!codigosDaCasa.has(cod)).forEach(cod => {
+      const k = chaveCasaCodigoMedicao(casa, cod);
+      if(medicaoNaoSeAplica.has(k)) naoAplica.push(cod);
+      else if(medidoEmOutra.has(k)) emOutro.push({cod, onde:[...medidoEmOutra.get(k)]});
+      else faltando.push(cod);
+    });
     if(faltando.length === 0) casasCompletas++;
-    return { casa, faltando };
+    totalOutro += emOutro.length;
+    return { casa, faltando, emOutro, naoAplica };
   });
   area.appendChild(el("div",{class:"cards-resumo",style:"margin-bottom:10px;"},[
-    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(codigosContrato.length)]), el("div",{class:"rotulo"},["Códigos no contrato"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(casasCompletas)]), el("div",{class:"rotulo"},["Casas com tudo pago"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(codigosContrato.length)]), el("div",{class:"rotulo"},["Códigos na medição"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(casasCompletas)]), el("div",{class:"rotulo"},["Casas sem nada faltando"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(casas.length-casasCompletas)]), el("div",{class:"rotulo"},["Casas com item faltando"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--cinza-700);"},[String(totalOutro)]), el("div",{class:"rotulo"},["Já medidos em outro boletim"])]),
   ]));
+  area.appendChild(el("div",{class:"nota",style:"margin-bottom:10px;"},["\"Faltando\" = esse código nunca foi medido pra essa casa em nenhum boletim. Se o serviço não existe naquela casa, clique em \"não se aplica\" que ele para de ser cobrado (dá pra voltar atrás)."]));
+  const chip = (texto, titulo, botaoTxt, onClick, estilo) => el("span",{style:`display:inline-flex;align-items:center;gap:4px;margin:0 6px 4px 0;padding:2px 6px;border-radius:10px;font-size:11.5px;${estilo}`, title:titulo||""},[
+    texto,
+    botaoTxt ? el("button",{style:"border:none;background:none;color:var(--vinho);cursor:pointer;font-size:11px;text-decoration:underline;padding:0;", onclick:onClick},[botaoTxt]) : null
+  ]);
   area.appendChild(el("div",{class:"tabela-wrap"},[
     el("table",{class:"tbl"},[
-      el("thead",null,[el("tr",null,[el("th",null,["Casa"]), el("th",null,["Situação"]), el("th",null,["Código(s) faltando nessa casa"])])]),
-      el("tbody",null, linhas.map(({casa,faltando}) => el("tr",null,[
+      el("thead",null,[el("tr",null,[el("th",null,["Casa"]), el("th",null,["Situação"]), el("th",null,["Faltando (nunca medido)"]), el("th",null,["Já medido em outro boletim"]), el("th",null,["Não se aplica"])])]),
+      el("tbody",null, linhas.map(({casa,faltando,emOutro,naoAplica}) => el("tr",null,[
         el("td",null,[casa]),
-        el("td",null,[faltando.length===0 ? el("span",{class:"badge completo"},["Completo"]) : el("span",{class:"badge pendente"},[`Faltando ${faltando.length}`])]),
-        el("td",null,[faltando.length===0 ? "—" : faltando.map(cod => `${cod} (${cfg.descricoesUau[cod]||"sem descrição"})`).join("; ")])
+        el("td",null,[faltando.length===0 ? el("span",{class:"badge completo"},["OK"]) : el("span",{class:"badge pendente"},[`Faltando ${faltando.length}`])]),
+        el("td",null, faltando.length ? faltando.map(cod => chip(descr(cod), "", "não se aplica", ()=>alternarNaoSeAplica(casa,cod), "background:var(--vermelho-claro);color:var(--vermelho);")) : ["—"]),
+        el("td",null, emOutro.length ? emOutro.map(({cod,onde}) => chip(descr(cod), "Medido em: "+onde.join("; "), "", null, "background:var(--cinza-200);color:var(--cinza-700);")) : ["—"]),
+        el("td",null, naoAplica.length ? naoAplica.map(cod => chip(descr(cod), "", "desfazer", ()=>alternarNaoSeAplica(casa,cod), "background:var(--cinza-100);color:var(--cinza-500);text-decoration:line-through;")) : ["—"])
       ])))
     ])
   ]));
 }
 
-// Aba 3: quanto já foi pago por casa, dentro desse contrato — soma simples dos valores medidos.
+// Aba 3: quanto já foi pago por casa, dentro dessa medição — soma simples dos valores medidos.
 function renderizarAbaValorPorCasaContrato(area, itensContrato){
   const casas = [...new Set(itensContrato.map(it=>it.casa))].sort((a,b)=>a.localeCompare(b,"pt-BR",{numeric:true}));
   const porCasa = casas.map(casa => {
@@ -5288,7 +5877,7 @@ function renderizarAbaValorPorCasaContrato(area, itensContrato){
         el("td",null,[casa]), el("td",null,[String(qtd)]), el("td",null,[total.toLocaleString("pt-BR",{minimumFractionDigits:2})])
       ])).concat([
         el("tr",{style:"font-weight:700;border-top:2px solid var(--cinza-300);"},[
-          el("td",null,["Total do contrato"]), el("td",null,[String(itensContrato.length)]), el("td",null,[totalGeral.toLocaleString("pt-BR",{minimumFractionDigits:2})])
+          el("td",null,["Total da medição"]), el("td",null,[String(itensContrato.length)]), el("td",null,[totalGeral.toLocaleString("pt-BR",{minimumFractionDigits:2})])
         ])
       ]))
     ])
@@ -5299,10 +5888,11 @@ function renderizarDetalheContrato(area, enriquecidos, medicaoAlvo){
   const { contrato, boletim } = medicaoAlvo;
   const chave = chaveMedicao(contrato, boletim);
   const itensMedicao = enriquecidos.filter(it=>chaveMedicao(it.contrato,it.boletim)===chave);
-  if(itensMedicao.length === 0){ contratoSelecionadoMedicao = null; return; }
+  if(itensMedicao.length === 0){ contratoSelecionadoMedicao = null; return false; }
   const emEspera = medicoesEmEspera.has(chave);
   const validado = medicoesValidadas.has(chave);
   const empresas = [...new Set(itensMedicao.map(it=>it.empresa).filter(Boolean))];
+  const podeEditar = MY_ROLE === "planejador" || !AUTH;
 
   area.appendChild(el("button",{class:"btn secundario pequeno", style:"margin-bottom:8px;", onclick:()=>{ contratoSelecionadoMedicao = null; renderizarMedicaoUau(); }},["← Voltar pra lista de medições"]));
   area.appendChild(el("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:10px;"},[
@@ -5310,24 +5900,24 @@ function renderizarDetalheContrato(area, enriquecidos, medicaoAlvo){
       el("h4",{style:"margin:0;"},[`Contrato ${contrato} · Boletim ${boletim||"—"}`]),
       el("div",{class:"sub",style:"margin:2px 0 0;"},[empresas.join(", ")||"—"])
     ]),
-    el("div",{style:"display:flex;gap:6px;flex-shrink:0;"},[
-      el("button",{onclick:()=>{
-        if(emEspera) medicoesEmEspera.delete(chave); else medicoesEmEspera.add(chave);
-        salvarMedicaoUau(); renderizarMedicaoUau();
-      }},[emEspera ? "▶" : "⏸"]),
-      el("button",{class:"btn secundario pequeno", onclick:()=>{
+    el("div",{style:"display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;"},[
+      el("button",{class:"btn secundario pequeno", onclick:()=>exportarItensMedicaoCSV(`medicao_${contrato}_boletim_${boletim||"sem"}.csv`, itensMedicao)},["Exportar CSV"]),
+      podeEditar ? el("button",{class:"btn secundario pequeno",
+        title: emEspera ? "Volta essa medição pra lista de pendentes de conferência" : "Tira essa medição da frente (ex.: falta FVS) sem perder nada — dá pra retomar depois",
+        onclick:()=>{
+          if(emEspera) medicoesEmEspera.delete(chave); else medicoesEmEspera.add(chave);
+          salvarMedicaoUau(); renderizarMedicaoUau();
+        }},[emEspera ? "▶ Retomar conferência" : "⏸ Colocar em espera"]) : null,
+      podeEditar ? el("button",{class:"btn secundario pequeno", onclick:()=>{
         if(validado) medicoesValidadas.delete(chave); else medicoesValidadas.add(chave);
         salvarMedicaoUau(); renderizarMedicaoUau();
-      }},[validado ? "Desmarcar validado" : "Marcar como validado"]),
-      el("button",{class:"btn perigo pequeno", onclick:()=>{
-        if(!confirm(`Excluir TODOS os ${itensMedicao.length} item(ns) do Contrato ${contrato} · Boletim ${boletim||"—"}? Isso não desfaz — se colar essa medição de novo, ela recria os itens.`)) return;
-        itensMedicao.forEach(it => delete medicaoItens[it.chave]);
-        medicoesEmEspera.delete(chave);
-        medicoesValidadas.delete(chave);
-        salvarMedicaoUau();
-        contratoSelecionadoMedicao = null;
-        renderizarMedicaoUau();
-      }},["Excluir medição inteira"])
+      }},[validado ? "Desmarcar validado" : "Marcar como validado"]) : null,
+      podeEditar ? el("button",{class:"btn perigo pequeno", onclick:()=>{
+        modalConfirmar("Excluir medição inteira", `Excluir os ${itensMedicao.length} item(ns) do Contrato ${contrato} · Boletim ${boletim||"—"}? Logo depois aparece a opção de desfazer.`, () => {
+          contratoSelecionadoMedicao = null;
+          excluirItensMedicaoComDesfazer(itensMedicao.map(it=>it.chave), [chave], `Medição Contrato ${contrato} · Boletim ${boletim||"—"} excluída (${itensMedicao.length} item(ns)).`);
+        });
+      }},["Excluir medição inteira"]) : null
     ])
   ]));
 
@@ -5337,40 +5927,58 @@ function renderizarDetalheContrato(area, enriquecidos, medicaoAlvo){
   });
   area.appendChild(abas);
 
-  if(abaContratoMedicao === "pagamento") renderizarAbaPagamentoContrato(area, itensMedicao);
+  if(abaContratoMedicao === "pagamento") renderizarAbaPagamentoContrato(area, itensMedicao, enriquecidos, chave);
   else if(abaContratoMedicao === "valor") renderizarAbaValorPorCasaContrato(area, itensMedicao);
   else renderizarAbaItensContrato(area, itensMedicao);
+  return true;
+}
+
+// Itens medidos + situação de FVS de cada um (usado pela Medição e pela sugestão de mês no Pagamento).
+function itensMedicaoEnriquecidos(){
+  const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
+  const memo = new Map();
+  return Object.entries(medicaoItens).map(([chave,item]) => {
+    const mapa = mapaCodigo.get(item.codigo);
+    const k = item.casa+"|"+item.codigo;
+    if(!memo.has(k)) memo.set(k, situacaoFvsItem(item.casa, mapa));
+    const sit = memo.get(k);
+    return { chave, ...item, mapa, comFvs: sit.comFvs, faltando: sit.faltando, motivo: sit.motivo };
+  });
+}
+
+// Guarda o cursor da caixa de busca que estava em uso e devolve depois de redesenhar — antes cada
+// letra digitada recriava a caixa e o cursor sumia (só a 1ª letra entrava).
+function comFocoPreservado(fn){
+  const ativo = document.activeElement;
+  const id = ativo && ativo.getAttribute ? ativo.getAttribute("data-foco") : null;
+  const sel = id && typeof ativo.selectionStart === "number" ? [ativo.selectionStart, ativo.selectionEnd] : null;
+  const scrollY = window.scrollY;
+  fn();
+  window.scrollTo(0, scrollY);
+  if(id){
+    const novo = document.querySelector(`[data-foco="${id}"]`);
+    if(novo){ novo.focus(); if(sel && novo.setSelectionRange){ try{ novo.setSelectionRange(sel[0], sel[1]); }catch(e){} } }
+  }
 }
 
 let buscaMedicaoUauTexto = "";
 let mostrarEmEsperaMedicao = false;
 let mostrarValidadosMedicao = false;
-function renderizarMedicaoUau(){
+function renderizarMedicaoUau(){ comFocoPreservado(renderizarMedicaoUauConteudo); }
+function renderizarMedicaoUauConteudo(){
   const area = document.getElementById("areaMedicaoUau");
   const meta = document.getElementById("medicaoUauMeta");
   if(!area || !meta) return;
-  const todos = Object.entries(medicaoItens).map(([chave,item])=>({chave, ...item}));
+  const todos = Object.keys(medicaoItens);
   if(todos.length === 0){ area.innerHTML = ""; meta.textContent = ""; return; }
   meta.textContent = `${todos.length} item(ns) medido(s) no total`;
+  const podeEditar = MY_ROLE === "planejador" || !AUTH;
 
-  const mapaCodigo = new Map(cfg.mapeamentosMedicao.map(m=>[m.codigo, m]));
-  let totalOk = 0;
-  const enriquecidos = todos.map(item => {
-    const mapa = mapaCodigo.get(item.codigo);
-    const lote = extrairLote(item.casa);
-    let comFvs = false, motivo = "";
-    if(!mapa) motivo = "código não vinculado a nenhum pacote/serviço";
-    else if(!lote) motivo = "casa não reconhecida (esperado tipo QD16LT12)";
-    else if(temFvsConcluida(lote, mapa.pacoteId, mapa.servico)) comFvs = true;
-    else {
-      const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
-      motivo = `FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não Encerrada`;
-    }
-    if(comFvs) totalOk++;
-    return { ...item, mapa, comFvs, motivo };
-  });
+  const enriquecidos = itensMedicaoEnriquecidos();
+  const totalOk = enriquecidos.filter(it=>it.comFvs).length;
   const totalEmEspera = enriquecidos.filter(it => medicoesEmEspera.has(chaveMedicao(it.contrato,it.boletim))).length;
   const totalValidados = enriquecidos.filter(it => medicoesValidadas.has(chaveMedicao(it.contrato,it.boletim))).length;
+  const totalSemVinculo = enriquecidos.filter(it => !it.mapa).length;
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
@@ -5380,17 +5988,17 @@ function renderizarMedicaoUau(){
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalValidados)]), el("div",{class:"rotulo"},["Validados"])]),
   ]));
-
-  if(contratoSelecionadoMedicao){
-    renderizarDetalheContrato(area, enriquecidos, contratoSelecionadoMedicao);
-    return;
+  if(totalSemVinculo){
+    area.appendChild(el("div",{class:"nota amarela"},[`${totalSemVinculo} item(ns) medido(s) com código ainda não vinculado a pacote/serviço — estão salvos e entram nos totais; vincule o código em "Análise por item de contrato" (acima) pra conferir a FVS deles.`]));
   }
+
+  if(contratoSelecionadoMedicao && renderizarDetalheContrato(area, enriquecidos, contratoSelecionadoMedicao)) return;
   renderizarListaContratosMedicao(area, enriquecidos);
 
-  area.appendChild(el("h4",{style:"margin:18px 0 6px;"},["Busca livre (todos os contratos)"]));
+  area.appendChild(el("h4",{style:"margin:18px 0 6px;"},["Busca livre (todas as medições)"]));
   const toolbar = el("div",{class:"toolbar",style:"margin:0 0 10px;"});
-  const inpBusca = el("input",{type:"text", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim, mês ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
-  inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUau(); });
+  const inpBusca = el("input",{type:"text", "data-foco":"buscaMedicaoLivre", placeholder:"Buscar casa, código, pacote/serviço, contrato, boletim, mês ou empresa…", value: buscaMedicaoUauTexto, style:"min-width:320px;"});
+  inpBusca.addEventListener("input", () => { buscaMedicaoUauTexto = inpBusca.value; renderizarMedicaoUauAtrasado(); });
   toolbar.appendChild(inpBusca);
   const lblEmEspera = el("label",{style:"display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--cinza-700);white-space:nowrap;"});
   const chkEmEspera = el("input",{type:"checkbox"});
@@ -5407,23 +6015,27 @@ function renderizarMedicaoUau(){
   lblValidados.appendChild(document.createTextNode(`Mostrar medições validadas (${totalValidados})`));
   toolbar.appendChild(lblValidados);
   toolbar.appendChild(el("div",{class:"espaco"}));
-  toolbar.appendChild(el("button",{class:"btn perigo pequeno", onclick:()=>{
-    if(!confirm(`Excluir TODOS os ${todos.length} itens da Conferência de Medição? Isso não desfaz.`)) return;
-    medicaoItens = {};
-    medicoesEmEspera = new Set();
-    medicoesValidadas = new Set();
-    salvarMedicaoUau();
-    renderizarMedicaoUau();
-  }},["Limpar tudo"]));
-  area.appendChild(toolbar);
 
   const busca = buscaMedicaoUauTexto.trim().toLowerCase();
   const filtrados = itensFiltradosMedicao(enriquecidos, busca, null)
     .sort((a,b)=> a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
 
+  toolbar.appendChild(el("button",{class:"btn secundario pequeno", title:"Baixa a lista abaixo, do jeito que está filtrada", onclick:()=>exportarItensMedicaoCSV("medicao_itens.csv", filtrados)},["Exportar CSV"]));
+  toolbar.appendChild(el("button",{class:"btn secundario pequeno", title:"Todos os itens Sem FVS (de todas as medições), agrupados por empresa — pra mandar pros responsáveis", onclick:()=>{
+    const semFvs = enriquecidos.filter(it=>!it.comFvs);
+    if(semFvs.length === 0){ mostrarToastInfo("Nenhum item Sem FVS — nada pra exportar."); return; }
+    exportarItensMedicaoCSV("medicao_sem_fvs_por_empresa.csv", semFvs);
+  }},["Sem FVS por empresa (CSV)"]));
+  if(podeEditar) toolbar.appendChild(el("button",{class:"btn perigo pequeno", onclick:()=>{
+    modalConfirmar("Limpar tudo", `Excluir TODOS os ${todos.length} itens da Conferência de Medição? Logo depois aparece a opção de desfazer.`, () => {
+      excluirItensMedicaoComDesfazer(Object.keys(medicaoItens), [...new Set([...medicoesEmEspera, ...medicoesValidadas])], `Conferência de Medição limpa (${todos.length} item(ns)).`);
+    });
+  }},["Limpar tudo"]));
+  area.appendChild(toolbar);
+
   const algumFiltroColunaAtivo = COLUNAS_FILTRAVEIS_MEDICAO.some(c => filtrosColunaMedicao[c]);
   if(filtrados.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},[(busca||algumFiltroColunaAtivo) ? "Nada encontrado com essa busca/filtro." : "Nenhum item pendente — os contratos em espera estão filtrados (marque a caixa acima pra ver)."]));
+    area.appendChild(el("div",{class:"msg-vazio"},[(busca||algumFiltroColunaAtivo) ? "Nada encontrado com essa busca/filtro." : "Nenhum item pendente — as medições em espera/validadas estão filtradas (marque as caixas acima pra ver)."]));
     return;
   }
 
@@ -5480,42 +6092,14 @@ function renderizarMedicaoUau(){
         celulaHeaderFiltro("boletim","Boletim"), celulaHeaderFiltro("mes","Mês"), celulaHeaderFiltro("empresa","Empresa"),
         el("th",null,[""])
       ])]),
-      el("tbody",null, mostrar.map(item => {
-        const pacote = item.mapa && cfg.pacotes.find(p=>p.id===item.mapa.pacoteId);
-        const btnExcluir = el("button",{class:"btn perigo pequeno", onclick:()=>{
-          if(!confirm(`Excluir o item "${item.casa} / ${item.codigo}"? Isso não desfaz — se ainda estiver na tabela colada, colar de novo recria ele.`)) return;
-          delete medicaoItens[item.chave];
-          salvarMedicaoUau();
-          renderizarMedicaoUau();
-        }},["Excluir"]);
-        let celulaSituacao;
-        if(item.comFvs){
-          celulaSituacao = el("span",{class:"badge completo"},["Com FVS"]);
-        } else {
-          const faltando = formulariosFaltandoDoItem(item.mapa);
-          celulaSituacao = el("div",null,[
-            el("span",{class:"badge pendente"},["Sem FVS"]),
-            faltando.length ? el("div",{class:"sub",style:"margin-top:3px;font-size:11px;line-height:1.3;"},[`Falta: ${faltando.join(", ")}`]) : null
-          ]);
-        }
-        return el("tr",null,[
-          el("td",null,[item.casa]), el("td",null,[item.codigo]),
-          el("td",{style:"max-width:220px;font-size:12px;color:var(--cinza-700);"},[cfg.descricoesUau[item.codigo]||"—"]),
-          el("td",null,[pacote ? (pacote.nome+" / "+item.mapa.servico) : el("span",{class:"badge pendente"},[item.motivo])]),
-          el("td",null,[item.valor.toLocaleString("pt-BR",{minimumFractionDigits:2})]),
-          el("td",null,[celulaSituacao]),
-          el("td",null,[item.contrato||"—"]), el("td",null,[item.boletim||"—"]),
-          el("td",null,[item.mesMedicao ? formatarMesAno(item.mesMedicao) : "—"]),
-          el("td",null,[item.empresa||"—"]),
-          el("td",null,[btnExcluir])
-        ]);
-      }))
+      el("tbody",null, mostrar.map(linhaItemMedicaoTr))
     ])
   ]));
   if(filtrados.length > LIMITE){
-    area.appendChild(el("div",{class:"sub",style:"padding:6px;"},[`Mostrando ${LIMITE} de ${filtrados.length} itens — use a busca acima pra refinar.`]));
+    area.appendChild(el("div",{class:"sub",style:"padding:6px;"},[`Mostrando ${LIMITE} de ${filtrados.length} itens — use a busca acima pra refinar (o Exportar CSV leva todos).`]));
   }
 }
+
 document.getElementById("btnProcessarMedicaoUau").addEventListener("click", processarColagemMedicaoUau);
 
 /* ===================== ABA RESUMO (relatório semanal, navegável por versão arquivada) ===================== */
@@ -5743,8 +6327,7 @@ function renderizarCompletoNivelCategorias(area){
     const completos = itens.filter(i=>i.completo).length;
     const pct = itens.length ? Math.round(completos/itens.length*100) : 0;
     grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(cat)};`, onclick:()=>{ completoNav.categoria = cat; renderizarCompleto(); }},[
-      el("div",{class:"avatar-pasta"},[iniciaisTexto(cat)]),
-      el("div",{class:"nome-pasta"},[cat]),
+      el("div",{class:"nome-pasta"},[el("span",{class:"nome-colorido grande", style:estiloCorDoNome(cat)+"white-space:normal;"},[cat])]),
       el("div",{class:"meta-pasta"},[`${pacotesCat.length} pacote(s)${itens.length? ` · ${completos}/${itens.length} completos`:""}`]),
       itens.length ? el("div",{class:"barra-fundo"},[el("div",{class:"barra-preench",style:`width:${pct}%`})]) : null
     ]));
@@ -5763,8 +6346,7 @@ function renderizarCompletoNivelPacotes(area, categoria){
   pacotesCat.forEach(pac => {
     const stats = statsPorPacote(pac.id);
     grade.appendChild(el("div",{class:"card-pasta", style:`--cor-destaque:${corDoVagaoOuPacote(pac.nome)};`, onclick:()=>{ completoNav.pacoteId = pac.id; renderizarCompleto(); }},[
-      el("div",{class:"avatar-pasta"},[iniciaisTexto(pac.nome)]),
-      el("div",{class:"nome-pasta"},[pac.nome]),
+      el("div",{class:"nome-pasta"},[el("span",{class:"nome-colorido grande", style:estiloCorDoNome(pac.nome)+"white-space:normal;"},[pac.nome])]),
       el("div",{class:"meta-pasta"},[stats.total ? `${stats.completos}/${stats.total} completos (${stats.pct}%)` : "sem atividade ainda"]),
       stats.total ? el("div",{class:"barra-fundo"},[el("div",{class:"barra-preench",style:`width:${stats.pct}%`})]) : null
     ]));
@@ -5984,6 +6566,85 @@ function atualizarTodaUI(){
 }
 
 /* ===================== Inicialização ===================== */
+/* ===================== Backups (2026-09-27) =====================
+   O servidor (api/db.js) guarda sozinho, na primeira gravação de cada dia, como cfg e medicaoUau
+   estavam ANTES dela — em obras/<id>/historico/<cfg|medicaoUau>/<AAAA-MM-DD>, pelos últimos 35 dias.
+   Aqui ela escolhe um dia e volta aquela parte dos dados pra como estava. Antes de restaurar, o
+   estado atual também é guardado (…-antes-restaurar-HHMM), então uma restauração errada tem volta. */
+const PARTES_BACKUP = [
+  { doc:"cfg", titulo:"Pacotes, Avanço Físico e Pagamento", descricao:"cadastro de vagões/pacotes/serviços, versões salvas da semana, OKs do Prevision e meses de pagamento" },
+  { doc:"medicaoUau", titulo:"Conferência de Medição", descricao:"itens colados do UAU, medições em espera/validadas" }
+];
+function rotuloBackup(id){
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:-antes-restaurar-(\d{2})(\d{2}))?/.exec(id);
+  if(!m) return id;
+  const data = `${m[3]}/${m[2]}/${m[1]}`;
+  return m[4] ? `${data} ${m[4]}:${m[5]} — como estava antes de uma restauração` : `Início de ${data}`;
+}
+async function abrirModalBackups(){
+  if(AUTH && MY_ROLE !== "planejador"){ mostrarToast("Só planejador acessa os backups."); return; }
+  mostrarLoading("Buscando cópias de segurança…");
+  const listas = {};
+  try{
+    for(const p of PARTES_BACKUP){
+      const snap = await db.collection("historico/"+p.doc).somenteIds().get();
+      listas[p.doc] = snap.docs.map(d=>d.id).sort().reverse();
+    }
+  }catch(e){ esconderLoading(); mostrarToast("⚠️ Não consegui listar os backups: "+(e&&e.message?e.message:e)); return; }
+  esconderLoading();
+  const corpo = el("div",{style:"max-height:60vh;overflow:auto;margin-bottom:12px;"});
+  PARTES_BACKUP.forEach(p => {
+    corpo.appendChild(el("h3",{style:"font-size:13px;margin:12px 0 2px;"},[p.titulo]));
+    corpo.appendChild(el("div",{class:"sub",style:"margin:0 0 6px;"},[p.descricao]));
+    const ids = listas[p.doc] || [];
+    if(ids.length === 0){ corpo.appendChild(el("div",{class:"sub",style:"margin:0 0 8px;font-style:italic;"},["Nenhuma cópia ainda — a primeira é criada automaticamente na próxima alteração."])); return; }
+    ids.forEach(id => corpo.appendChild(el("div",{style:"display:flex;align-items:center;gap:10px;padding:5px 2px;border-bottom:1px solid var(--cinza-200);font-size:12.5px;"},[
+      el("span",{style:"flex:1;"},[rotuloBackup(id)]),
+      el("button",{class:"btn secundario pequeno", onclick:()=>restaurarBackup(p, id, overlay)},["Restaurar"])
+    ])));
+  });
+  const overlay = el("div",{class:"modal-overlay"},[
+    el("div",{class:"modal-caixa larga"},[
+      el("h4",null,["Backups"]),
+      el("p",null,["O app guarda sozinho como os dados estavam no começo de cada dia (últimos 35 dias). Restaurar volta aquela parte dos dados pro que estava naquele momento — o que foi feito depois disso nela se perde. Antes de restaurar, a situação atual também é guardada aqui, pra poder voltar atrás."]),
+      corpo,
+      el("div",{class:"modal-acoes"},[el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Fechar"])])
+    ])
+  ]);
+  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
+function restaurarBackup(parte, id, overlayLista){
+  modalConfirmar("Restaurar backup", `Voltar "${parte.titulo}" para: ${rotuloBackup(id)}? Tudo que foi alterado nessa parte depois disso vai ser substituído (a situação atual fica guardada nos backups). A página recarrega em seguida.`, async () => {
+    mostrarLoading("Restaurando…");
+    try{
+      const snap = await db.doc(`historico/${parte.doc}/${id}`).get();
+      if(!snap.exists) throw new Error("backup não encontrado");
+      const valor = clonarJson(snap.data()); delete valor._rev; delete valor._snapshotEm;
+      const agora = new Date();
+      const idAntes = `${dataLocalISO(agora)}-antes-restaurar-${String(agora.getHours()).padStart(2,"0")}${String(agora.getMinutes()).padStart(2,"0")}`;
+      const atual = parte.doc === "cfg" ? cfgParaGravar() : medicaoParaGravar();
+      await db.doc(`historico/${parte.doc}/${idAntes}`).set(clonarJson(atual));
+      if(parte.doc === "cfg"){
+        cadastroSujo = false;
+        aplicarCfgMesclado(valor);
+        await docCfg.salvar();
+      } else {
+        aplicarMedicaoMesclada(valor);
+        await docMedicao.salvar();
+      }
+      if(overlayLista) fecharModal(overlayLista);
+      ignorarAvisoSaida = true;
+      location.reload();
+    }catch(e){
+      esconderLoading();
+      mostrarToast("⚠️ Não consegui restaurar: "+(e&&e.message?e.message:e));
+    }
+  }, "Restaurar");
+}
+document.getElementById("btnBackups").addEventListener("click", abrirModalBackups);
+
 document.getElementById("btnUsuarios").addEventListener("click", openUsersModal);
 document.getElementById("btnTrocarObra").addEventListener("click", ()=> showObraScreen());
 document.getElementById("btnSair").addEventListener("click", async ()=>{ if(AUTH) await AUTH.auth.signOut(); location.reload(); });
