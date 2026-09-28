@@ -3212,6 +3212,7 @@ let cadastroBusca = "";
 let vagoesExpandidos = new Set();
 let pacotesExpandidos = new Set();
 let vagaoArrastando = null;
+let pacoteArrastando = null;
 
 function marcarCadastroSujo(){
   cadastroSujo = true;
@@ -3449,11 +3450,22 @@ function construirNoPacote(pac, busca){
     marcarCadastroSujo(); renderizarArvoreCadastro();
   });
 
+  // Arrastar + setas pra reordenar entre os pacotes DO MESMO vagão (2026-09-28, pedido dela: vagão e
+  // serviço já reordenavam assim, faltava pacote) — mesmo padrão do resto da árvore, direto na linha,
+  // sem precisar abrir um modal à parte.
+  const pacotesIrmaos = pacotesDoVagaoEmOrdem(pac.vagaoId);
+  const alcaArrastarPacote = el("span",{class:"alca-arrastar", title:"Arrastar pra reordenar entre os pacotes deste vagão", draggable:"true"},["⋮⋮"]);
+  alcaArrastarPacote.addEventListener("click", e=>e.stopPropagation());
+  alcaArrastarPacote.addEventListener("dragstart", e => { pacoteArrastando = pac; e.stopPropagation(); });
+  alcaArrastarPacote.addEventListener("dragend", () => { pacoteArrastando = null; });
+
   const cab = el("div",{class:"no-pacote-cab"},[
+    alcaArrastarPacote,
     el("span",{class:"seta"},[expandido?"▾":"▸"]),
     inpNome,
     el("span",{class:"meta-no"},[`${servicos.length} serviço(s)`]),
     el("div",{class:"acoes-no"},[
+      botoesOrdem(pacotesIrmaos, pac),
       (()=>{
         const sel = el("select",{class:"seletor-vagao", title:"Mover para outro vagão"});
         vagoesEmOrdem().forEach(v => sel.appendChild(el("option",{value:v.id},[v.nome])));
@@ -3493,6 +3505,19 @@ function construirNoPacote(pac, busca){
   });
 
   const no = el("div",{class:"no-pacote"},[cab]);
+  alcaArrastarPacote.addEventListener("dragstart", () => no.classList.add("arrastando"));
+  alcaArrastarPacote.addEventListener("dragend", () => no.classList.remove("arrastando"));
+  no.addEventListener("dragover", e => e.preventDefault());
+  no.addEventListener("drop", e => {
+    e.preventDefault();
+    if(!pacoteArrastando || pacoteArrastando===pac || pacoteArrastando.vagaoId!==pac.vagaoId) return;
+    const ord = pacotesDoVagaoEmOrdem(pac.vagaoId);
+    const de = ord.indexOf(pacoteArrastando), para = ord.indexOf(pac);
+    ord.splice(de,1); ord.splice(para,0,pacoteArrastando);
+    ord.forEach((p,idx)=>p.ordem=idx);
+    pacoteArrastando = null;
+    marcarCadastroSujo(); renderizarArvoreCadastro();
+  });
   if(expandido){
     const corpo = el("div",{class:"no-pacote-corpo"});
     corpo.appendChild(blocoSublocaisEsperados(pac));
