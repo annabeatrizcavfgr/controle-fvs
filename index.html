@@ -273,6 +273,12 @@
   .nome-colorido{display:inline-block;padding:4px 10px;border-radius:6px;font-weight:700;font-size:12.5px;line-height:1.3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .nome-colorido.grande{font-size:13px;padding:5px 12px;}
   .no-vagao-cab input.nome-colorido-input, .no-pacote-cab input.nome-colorido-input{border-radius:6px;padding:4px 10px;flex:0 1 auto;width:auto;min-width:120px;}
+  .contagem-sub{background:var(--cinza-200);color:var(--cinza-700);border-radius:10px;padding:0 7px;font-size:11px;margin-left:4px;}
+  .contagem-sub:empty{display:none;}
+  .contagem-sub.pend{background:var(--amarelo-claro);color:var(--amarelo);}
+  .seg-btn.ativo .contagem-sub{background:#fff;color:var(--vinho);}
+  .grupo-mapeamento-cab{display:flex;align-items:center;gap:8px;padding:7px 8px;cursor:pointer;border-radius:6px;user-select:none;}
+  .grupo-mapeamento-cab:hover{background:var(--cinza-100);}
   .no-servico{border:1px solid var(--cinza-200);border-radius:8px;background:#fff;overflow:hidden;margin-bottom:8px;}
   .no-servico-cab{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;background:var(--cinza-100);}
   .no-servico-cab:hover{background:var(--cinza-200);}
@@ -450,7 +456,16 @@
 
   <!-- ABA PAGAMENTO (rotina mensal, medição de empreiteiro) -->
   <div class="aba-conteudo" id="aba-pagamento">
-    <div class="painel">
+    <!-- subpáginas do Controle de Medições (2026-09-28): cada parte numa tela só dela — a lista de
+         itens de contrato passa de mil códigos e empurrava o resto da página pra baixo -->
+    <div style="margin-bottom:12px;">
+      <div class="segmentado" id="segMedicoesSub" style="display:inline-flex;">
+        <button class="seg-btn" data-sub="medicao">Conferência de Medição</button>
+        <button class="seg-btn" data-sub="pagamento">Pagamento</button>
+        <button class="seg-btn" data-sub="itens">Itens de contrato <span id="ctItensContrato" class="contagem-sub"></span></button>
+      </div>
+    </div>
+    <div class="painel" id="painelPagamento">
       <div class="toolbar" id="toolbarPagamentoTopo">
         <div class="segmentado" id="segPagamentoModo">
           <button class="seg-btn ativo" data-modo="pacote">Por pacote</button>
@@ -475,10 +490,10 @@
 
     <div class="painel" id="painelMapeamentoMedicao">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
-        <h3 style="margin:0;">Análise por item de contrato</h3>
+        <h3 style="margin:0;">Itens de contrato</h3>
         <button class="btn secundario pequeno" id="btnNovoMapeamentoMedicao">+ Novo mapeamento</button>
       </div>
-      <div class="sub" style="margin:4px 0 12px;">Cadastre aqui a quais pacote/serviço da FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular.</div>
+      <div class="sub" style="margin:4px 0 12px;">A qual pacote/serviço da FVS cada código de medição do UAU corresponde — não precisa esperar aparecer numa colagem pra vincular. Os grupos ficam recolhidos; use a busca pra achar um código, descrição, pacote ou serviço.</div>
       <div id="listaMapeamentoMedicao"></div>
     </div>
 
@@ -5289,55 +5304,130 @@ function linhaRascunhoMapeamento(rascunho){
   return el("div",{class:"linha-servico"},[el("div",{class:"info"},info), linhaBotoes]);
 }
 
-function renderizarMapeamentoMedicao(){
+// Lista de itens de contrato (2026-09-28): são mais de mil códigos de orçamento, então fica numa
+// subpágina só dela, com os grupos Vagão > Pacote RECOLHIDOS (clica pra abrir) e uma busca por
+// código/descrição/pacote/serviço — com busca, mostra só o que bate, já aberto. Códigos novos
+// aguardando vínculo aparecem sempre no topo.
+let buscaItensContrato = "";
+let gruposItensContratoAbertos = new Set(); // "v:<vagaoId>" / "p:<pacoteId>"
+const LIMITE_ITENS_CONTRATO_BUSCA = 300;
+const renderizarMapeamentoMedicaoAtrasado = debounce(() => renderizarMapeamentoMedicao(), 200);
+function renderizarMapeamentoMedicao(){ comFocoPreservado(renderizarMapeamentoMedicaoConteudo); }
+function renderizarMapeamentoMedicaoConteudo(){
   const area = document.getElementById("listaMapeamentoMedicao");
   if(!area) return;
   sincronizarRascunhosComItensMedidos();
+  atualizarContagemItensContrato();
   area.innerHTML = "";
   if(cfg.mapeamentosMedicao.length === 0 && rascunhosMapeamentoMedicao.length === 0){
-    area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela abaixo que o app pergunta na hora."]));
+    area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código cadastrado ainda — clique em \"+ Novo mapeamento\", ou cole uma tabela na Conferência de Medição que o app pergunta na hora."]));
     return;
   }
-  // Agrupado Vagão > Pacote > Serviço > códigos (na mesma ordem vagão→pacote do Cadastro). São
-  // muitos códigos de orçamento (um por item do UAU) — agrupar só por pacote deixava a lista comprida
-  // demais pra bater o olho; com o serviço no meio, o caminho fica "este código é deste serviço,
-  // deste pacote, deste vagão", em vez de uma lista só de códigos misturados dentro do pacote.
-  function renderizarItensAgrupadosPorServico(itens){
+
+  if(rascunhosMapeamentoMedicao.length){
+    area.appendChild(el("div",{class:"nota amarela",style:"margin-bottom:8px;"},[`${rascunhosMapeamentoMedicao.length} código(s) aguardando vínculo — escolha o pacote e o serviço e clique em "Vincular".`]));
+    rascunhosMapeamentoMedicao.forEach(r => area.appendChild(linhaRascunhoMapeamento(r)));
+    area.appendChild(el("div",{style:"height:14px;"}));
+  }
+
+  const toolbar = el("div",{class:"toolbar",style:"margin-bottom:8px;"});
+  const inpBusca = el("input",{type:"text", "data-foco":"buscaItensContrato", placeholder:"Buscar código, descrição, pacote ou serviço…", value: buscaItensContrato});
+  inpBusca.addEventListener("input", () => { buscaItensContrato = inpBusca.value; renderizarMapeamentoMedicaoAtrasado(); });
+  toolbar.appendChild(inpBusca);
+  toolbar.appendChild(el("span",{class:"sub",style:"margin:0;"},[`${cfg.mapeamentosMedicao.length} código(s) vinculado(s)`]));
+  toolbar.appendChild(el("div",{class:"espaco"}));
+  toolbar.appendChild(el("button",{class:"btn secundario pequeno", onclick:()=>{
+    vagoesComPacotesEmOrdem().forEach(v => { gruposItensContratoAbertos.add("v:"+v.id); pacotesDoVagaoEmOrdem(v.id).forEach(p => gruposItensContratoAbertos.add("p:"+p.id)); });
+    gruposItensContratoAbertos.add("v:__excluido");
+    renderizarMapeamentoMedicao();
+  }},["Expandir tudo"]));
+  toolbar.appendChild(el("button",{class:"btn secundario pequeno", onclick:()=>{ gruposItensContratoAbertos.clear(); renderizarMapeamentoMedicao(); }},["Recolher tudo"]));
+  area.appendChild(toolbar);
+
+  const busca = normalizarMacro(buscaItensContrato);
+  const nomePacote = new Map(cfg.pacotes.map(p=>[p.id, p.nome]));
+  const bate = m => !busca || normalizarMacro([m.codigo, cfg.descricoesUau[m.codigo]||"", nomePacote.get(m.pacoteId)||"", m.servico||""].join(" ")).includes(busca);
+  const filtrados = cfg.mapeamentosMedicao.filter(bate);
+  if(busca && filtrados.length === 0){ area.appendChild(el("div",{class:"msg-vazio"},["Nenhum código encontrado com essa busca."])); return; }
+
+  let mostrados = 0;
+  const cabGrupo = (chave, conteudo, nivel) => {
+    const aberto = !!busca || gruposItensContratoAbertos.has(chave);
+    return { aberto, cab: el("div",{class:"grupo-mapeamento-cab", style: nivel===2 ? "margin-left:14px;" : "", onclick:()=>{
+      if(busca) return;
+      if(gruposItensContratoAbertos.has(chave)) gruposItensContratoAbertos.delete(chave); else gruposItensContratoAbertos.add(chave);
+      renderizarMapeamentoMedicao();
+    }},[el("span",{class:"seta"},[aberto?"▾":"▸"]), ...conteudo]) };
+  };
+  // dentro de um pacote aberto: Serviço > códigos (serviço só como subtítulo, sem recolher)
+  function renderizarCodigos(itens, destino){
     const porServico = new Map();
-    itens.forEach(m => {
-      const chave = m.servico || "(sem serviço)";
-      if(!porServico.has(chave)) porServico.set(chave, []);
-      porServico.get(chave).push(m);
-    });
+    itens.forEach(m => { const k = m.servico || "(sem serviço)"; if(!porServico.has(k)) porServico.set(k, []); porServico.get(k).push(m); });
     [...porServico.entries()].sort((a,b)=>a[0].localeCompare(b[0],"pt-BR")).forEach(([servico, ms]) => {
-      area.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--vinho);margin:8px 0 4px 16px;"},[servico]));
-      ms.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => area.appendChild(linhaMapeamentoMedicao(m)));
+      if(busca && mostrados >= LIMITE_ITENS_CONTRATO_BUSCA) return;
+      destino.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--vinho);margin:8px 0 4px 34px;"},[servico]));
+      ms.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => {
+        if(busca && mostrados >= LIMITE_ITENS_CONTRATO_BUSCA) return;
+        mostrados++;
+        const linha = linhaMapeamentoMedicao(m);
+        linha.style.marginLeft = "28px";
+        destino.appendChild(linha);
+      });
     });
   }
   const porPacote = new Map();
-  cfg.mapeamentosMedicao.forEach(m => {
-    if(!porPacote.has(m.pacoteId)) porPacote.set(m.pacoteId, []);
-    porPacote.get(m.pacoteId).push(m);
-  });
+  filtrados.forEach(m => { if(!porPacote.has(m.pacoteId)) porPacote.set(m.pacoteId, []); porPacote.get(m.pacoteId).push(m); });
   vagoesComPacotesEmOrdem().forEach(vagao => {
     const pacotesComItens = pacotesDoVagaoEmOrdem(vagao.id).filter(pac=>porPacote.has(pac.id));
     if(pacotesComItens.length === 0) return;
-    area.appendChild(el("div",{class:"rotulo-categoria", style:`--cor-destaque:${corDoVagaoOuPacote(vagao.nome)};`},[vagao.nome]));
+    const qtdVagao = pacotesComItens.reduce((s,p)=>s+porPacote.get(p.id).length, 0);
+    const gv = cabGrupo("v:"+vagao.id, [nomeColorido(vagao.nome), el("span",{class:"meta-no"},[`${pacotesComItens.length} pacote(s) · ${qtdVagao} código(s)`])], 1);
+    area.appendChild(gv.cab);
     pacotesComItens.forEach(pac => {
-      area.appendChild(el("div",{style:"font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--cinza-700);margin:12px 0 4px 6px;"},[pac.nome + (pac.semPrevision ? " (sem avanço)" : "")]));
-      renderizarItensAgrupadosPorServico(porPacote.get(pac.id));
+      if(gv.aberto){
+        const itens = porPacote.get(pac.id);
+        const gp = cabGrupo("p:"+pac.id, [nomeColorido(pac.nome + (pac.semPrevision ? " (sem avanço)" : "")), el("span",{class:"meta-no"},[`${itens.length} código(s)`])], 2);
+        area.appendChild(gp.cab);
+        if(gp.aberto) renderizarCodigos(itens, area);
+      }
       porPacote.delete(pac.id);
     });
   });
   if(porPacote.size){
-    area.appendChild(el("div",{class:"rotulo-categoria"},["Pacote excluído"]));
-    renderizarItensAgrupadosPorServico([...porPacote.values()].flat());
+    const restantes = [...porPacote.values()].flat();
+    const gx = cabGrupo("v:__excluido", [el("b",null,["Pacote excluído"]), el("span",{class:"meta-no"},[`${restantes.length} código(s) — vincule de novo`])], 1);
+    area.appendChild(gx.cab);
+    if(gx.aberto) renderizarCodigos(restantes, area);
   }
-  if(rascunhosMapeamentoMedicao.length){
-    area.appendChild(el("div",{class:"rotulo-categoria"},["Novo"]));
-    rascunhosMapeamentoMedicao.forEach(r => area.appendChild(linhaRascunhoMapeamento(r)));
+  if(busca && filtrados.length > mostrados){
+    area.appendChild(el("div",{class:"sub",style:"padding:8px;"},[`Mostrando ${mostrados} de ${filtrados.length} códigos — refine a busca pra ver os outros.`]));
   }
 }
+function normalizarMacro(txt){ return normalizarNomeMacrofluxo(txt||""); }
+function atualizarContagemItensContrato(){
+  const ct = document.getElementById("ctItensContrato");
+  if(!ct) return;
+  const pend = rascunhosMapeamentoMedicao.filter(r=>r.travado).length;
+  ct.textContent = pend ? `${pend} sem vínculo` : String(cfg.mapeamentosMedicao.length);
+  ct.classList.toggle("pend", pend > 0);
+}
+
+// Subpáginas do Controle de Medições — lembra a última escolhida neste navegador.
+let subpaginaMedicoes = "medicao";
+try{ const s = localStorage.getItem("fvs_subpagina_medicoes"); if(["medicao","pagamento","itens"].includes(s)) subpaginaMedicoes = s; }catch(e){}
+function mostrarSubpaginaMedicoes(sub){
+  subpaginaMedicoes = sub;
+  try{ localStorage.setItem("fvs_subpagina_medicoes", sub); }catch(e){}
+  document.querySelectorAll("#segMedicoesSub .seg-btn").forEach(b => b.classList.toggle("ativo", b.dataset.sub === sub));
+  document.getElementById("painelMedicaoUau").style.display = sub === "medicao" ? "" : "none";
+  document.getElementById("painelPagamento").style.display = sub === "pagamento" ? "" : "none";
+  document.getElementById("painelMapeamentoMedicao").style.display = sub === "itens" ? "" : "none";
+}
+document.getElementById("segMedicoesSub").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-sub]");
+  if(btn) mostrarSubpaginaMedicoes(btn.dataset.sub);
+});
+mostrarSubpaginaMedicoes(subpaginaMedicoes);
 document.getElementById("btnNovoMapeamentoMedicao").addEventListener("click", () => {
   rascunhosMapeamentoMedicao.push({ codigo:"", travado:false, pacoteId:null, servico:null, descricao:null });
   renderizarMapeamentoMedicao();
@@ -5625,7 +5715,7 @@ async function processarColagemMedicaoUau(){
   renderizarMapeamentoMedicao();
   renderizarMedicaoUau();
   renderizarPagamentoTab();
-  const avisoNovosCodigos = faltando.length ? ` ${faltando.length} código(s) novo(s) (${semVinculo} linha(s)) ainda sem vínculo — já ficaram salvos; vincule em "Análise por item de contrato" que eles passam a conferir sozinhos.` : "";
+  const avisoNovosCodigos = faltando.length ? ` ${faltando.length} código(s) novo(s) (${semVinculo} linha(s)) ainda sem vínculo — já ficaram salvos; vincule na subpágina "Itens de contrato" que eles passam a conferir sozinhos.` : "";
   mostrarToastInfo(`Tabela processada: ${novos} item(ns) novo(s), ${atualizados} atualizado(s).${avisoNovosCodigos}`);
 }
 
@@ -6086,7 +6176,10 @@ function renderizarMedicaoUauConteudo(){
     el("div",{class:"card-num", title:"Medições ainda não validadas que têm pelo menos um item sem FVS Encerrada"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(totalComPendenciaFvs)]), el("div",{class:"rotulo"},["Com item sem FVS"])]),
   ]));
   if(totalSemVinculo){
-    area.appendChild(el("div",{class:"nota amarela"},[`${totalSemVinculo} item(ns) medido(s) com código ainda não vinculado a pacote/serviço — estão salvos e entram nos totais; vincule o código em "Análise por item de contrato" (acima) pra conferir a FVS deles.`]));
+    area.appendChild(el("div",{class:"nota amarela",style:"display:flex;align-items:center;gap:10px;flex-wrap:wrap;"},[
+      el("span",{style:"flex:1;"},[`${totalSemVinculo} item(ns) medido(s) com código ainda não vinculado a pacote/serviço — estão salvos e entram nos totais; vincule o código em "Itens de contrato" pra conferir a FVS deles.`]),
+      el("button",{class:"btn secundario pequeno", onclick:()=>{ mostrarSubpaginaMedicoes("itens"); window.scrollTo(0,0); }},["Ir para Itens de contrato"])
+    ]));
   }
 
   if(contratoSelecionadoMedicao && renderizarDetalheContrato(area, enriquecidos, contratoSelecionadoMedicao)) return;
