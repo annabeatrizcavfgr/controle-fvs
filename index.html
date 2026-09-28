@@ -2166,8 +2166,23 @@ function regraCombinaCasa(regra, casaOuObjComCasa){
   return regra.casas.includes(casaOuObjComCasa.casa);
 }
 
+// FVS ALTERNATIVAS (2026-09-28, pedido dela: "formulário 123 OU 124" valerem o mesmo avanço) — uma
+// linha de mapeamento pode aceitar mais de um Formulário FVS como equivalente; regra.formulario
+// continua sendo o "principal" (usado pra nomear/agrupar a linha e nas chaves de Prevision/Pagamento,
+// que não mudam mesmo que uma casa feche pelo alternativo em vez do principal — ver chaveRegra),
+// regra.formulariosAlternativos guarda os demais que também fecham essa MESMA linha.
+function formulariosDaRegra(regra){
+  const lista = [regra.formulario, ...(regra.formulariosAlternativos||[])].filter(Boolean);
+  return [...new Set(lista)];
+}
+// Rótulo pra exibir os formulários de uma linha — junta com "OU" quando há alternativos.
+function rotuloFormulariosRegra(regra){
+  return formulariosDaRegra(regra).join(" OU ");
+}
+
 function regraAtendida(regra, entrada){
-  return entrada.registros.some(r => r.formulario === regra.formulario && regraCombinaObservacao(regra, r));
+  const formularios = formulariosDaRegra(regra);
+  return entrada.registros.some(r => formularios.includes(r.formulario) && regraCombinaObservacao(regra, r));
 }
 
 function rotuloRegra(regra){
@@ -2210,7 +2225,7 @@ function calcularItemPacoteCasa(pac, entrada){
   const feitos = regrasFeitas.map(rotuloRegra);
   const faltando = regrasFaltando.map(rotuloRegra);
 
-  const formulariosDasRegras = new Set(regras.map(r => r.formulario));
+  const formulariosDasRegras = new Set(regras.flatMap(formulariosDaRegra));
   const registrosRelevantes = entrada.registros.filter(r => formulariosDasRegras.has(r.formulario));
   let dataConclusao = null;
   if(completo){
@@ -2265,14 +2280,15 @@ function recalcularTudo(){
   pendencias = { semPacote: new Map(), semSublocalAmbiguo: [], semCasa: [...dados.semCasa] };
 
   const formulariosComSublocalEspecifico = new Set(
-    cfg.mapeamentos.filter(m => m.sublocal && m.sublocal !== "").map(m => m.formulario)
+    cfg.mapeamentos.filter(m => m.sublocal && m.sublocal !== "").flatMap(formulariosDaRegra)
   );
 
   // Um registro está "resolvido" quando existe uma regra pra ele — genérica (vale pra qualquer
   // observação/casa) ou específica pra observação exata e/ou pras casas exatas dele. Isso permite
-  // resolver cada variação de observação, ou cada lote de casas, separadamente.
+  // resolver cada variação de observação, ou cada lote de casas, separadamente. Conta tanto o
+  // formulário principal da regra quanto qualquer FVS alternativa dela.
   function registroTemRegra(reg){
-    return cfg.mapeamentos.some(m => m.formulario === reg.formulario && regraCombinaObservacao(m, reg) && regraCombinaCasa(m, reg));
+    return cfg.mapeamentos.some(m => formulariosDaRegra(m).includes(reg.formulario) && regraCombinaObservacao(m, reg) && regraCombinaCasa(m, reg));
   }
 
   // Pendência: formulário (ou uma variação específica dele, por observação) sem regra configurada.
@@ -2309,7 +2325,8 @@ function recalcularTudo(){
       // Prevision/pagamento são acompanhados por serviço concluído, não pelo pacote inteiro —
       // uma casa pode ter serviços do mesmo pacote com empresas/meses de pagamento diferentes.
       regrasFeitas.forEach(regra => {
-        const registrosDaRegra = entrada.registros.filter(r => r.formulario === regra.formulario && regraCombinaObservacao(regra, r));
+        const formulariosRegra = formulariosDaRegra(regra);
+        const registrosDaRegra = entrada.registros.filter(r => formulariosRegra.includes(r.formulario) && regraCombinaObservacao(regra, r));
         const empresas = [...new Set(registrosDaRegra.map(r=>r.fornecedor).filter(Boolean))];
         let dataRegra = null;
         registrosDaRegra.forEach(r => { if(r.data && (!dataRegra || r.data > dataRegra)) dataRegra = r.data; });
@@ -2488,8 +2505,8 @@ function fecharModal(overlay){
   document.removeEventListener("keydown", overlay._onKeydown);
 }
 
-function modalPrompt(titulo, mensagem, valorInicial, onConfirmar){
-  const input = el("input",{type:"text", value: valorInicial||""});
+function modalPrompt(titulo, mensagem, valorInicial, onConfirmar, listaId){
+  const input = el("input", listaId ? {type:"text", value: valorInicial||"", list:listaId} : {type:"text", value: valorInicial||""});
   const overlay = el("div",{class:"modal-overlay"},[
     el("div",{class:"modal-caixa"},[
       el("h4",null,[titulo]),
@@ -3555,13 +3572,45 @@ function blocoSublocaisEsperados(pac){
   return wrap;
 }
 
+// Linhas com o editor de "FVS alternativas" (OU) aberto agora — pra não fechar sozinho a cada
+// redesenho da árvore (mesmo padrão de vagoesExpandidos/pacotesExpandidos).
+let formulariosAltAbertos = new Set();
+
+// Chips dos Formulários FVS alternativos de UMA linha (2026-09-28, pedido dela: "formulário 123 OU
+// 124" fecharem o MESMO avanço) — qualquer registro do MOBUSS com o formulário principal OU com
+// algum destes alternativos conta como esse serviço concluído (ver formulariosDaRegra/regraAtendida).
+function blocoFormulariosAlternativos(map){
+  const wrap = el("div",{class:"chips-editor", style:"margin-top:4px;"});
+  (map.formulariosAlternativos||[]).forEach(f => {
+    wrap.appendChild(el("span",{class:"chip", title:f},[
+      f.length>40 ? f.slice(0,38)+"…" : f,
+      el("button",{onclick:()=>{
+        map.formulariosAlternativos = map.formulariosAlternativos.filter(x=>x!==f);
+        marcarCadastroSujo(); renderizarArvoreCadastro();
+      }},["✕"])
+    ]));
+  });
+  const addBtn = el("button",{class:"chip-add"},["+ formulário alternativo"]);
+  addBtn.addEventListener("click", () => {
+    modalPrompt("Formulário FVS alternativo", `Qualquer registro do MOBUSS com ESTE formulário também fecha "${map.servico || map.formulario}" — use pra formulários diferentes que devem valer o mesmo avanço (ex.: FVS 123 e FVS 124).`, "", nome => {
+      const v = normTexto(nome);
+      if(v === map.formulario || (map.formulariosAlternativos||[]).includes(v)){ mostrarToast(`"${v}" já está nessa linha.`); return; }
+      map.formulariosAlternativos = [...(map.formulariosAlternativos||[]), v];
+      const s = new Set(cfg.knownFormularios); s.add(v); cfg.knownFormularios=[...s];
+      marcarCadastroSujo(); renderizarArvoreCadastro();
+    }, "dlFormularios");
+  });
+  wrap.appendChild(addBtn);
+  return wrap;
+}
+
 function linhaServicoArvore(map, servicosDoPacote){
   const inpServico = el("input",{value:map.servico||"", placeholder:"(nome do serviço)", style:"font-weight:600;border:1px solid transparent;background:transparent;border-radius:4px;padding:2px 4px;width:100%;"});
   inpServico.addEventListener("focus",()=>{inpServico.style.borderColor="var(--cinza-300)";inpServico.style.background="#fff";});
   inpServico.addEventListener("blur",()=>{inpServico.style.borderColor="transparent";inpServico.style.background="transparent";});
   inpServico.addEventListener("change", ()=>{ map.servico = normTexto(inpServico.value); marcarCadastroSujo(); });
 
-  const inpFormulario = el("input",{value:map.formulario, list:"dlFormularios", style:"border:1px solid transparent;background:transparent;border-radius:4px;padding:2px 4px;width:100%;font-size:11px;color:var(--cinza-700);"});
+  const inpFormulario = el("input",{value:map.formulario, list:"dlFormularios", style:"border:1px solid transparent;background:transparent;border-radius:4px;padding:2px 4px;flex:1;min-width:0;font-size:11px;color:var(--cinza-700);"});
   inpFormulario.addEventListener("focus",()=>{inpFormulario.style.borderColor="var(--cinza-300)";inpFormulario.style.background="#fff";});
   inpFormulario.addEventListener("blur",()=>{inpFormulario.style.borderColor="transparent";inpFormulario.style.background="transparent";});
   inpFormulario.addEventListener("change", ()=>{
@@ -3575,6 +3624,17 @@ function linhaServicoArvore(map, servicosDoPacote){
     const s = new Set(cfg.knownFormularios); s.add(map.formulario); cfg.knownFormularios=[...s];
     marcarCadastroSujo();
   });
+
+  const qtdAlt = (map.formulariosAlternativos||[]).length;
+  const abertoAlt = formulariosAltAbertos.has(map.id);
+  const btnAlt = el("button",{class:"btn secundario pequeno", style:"font-size:10.5px;padding:1px 6px;flex-shrink:0;",
+    title:"Aceitar outro(s) Formulário(s) FVS além deste pra fechar o mesmo serviço (ex.: FVS 123 OU FVS 124)",
+    onclick:()=>{
+      if(formulariosAltAbertos.has(map.id)) formulariosAltAbertos.delete(map.id); else formulariosAltAbertos.add(map.id);
+      renderizarArvoreCadastro();
+    }
+  },[qtdAlt ? `${qtdAlt} OU ${abertoAlt?"▴":"▾"}` : "+ OU"]);
+  const linhaFormulario = el("div",{style:"display:flex;align-items:center;gap:4px;"},[inpFormulario, btnAlt]);
 
   const inpSublocal = el("input",{value:map.sublocal||"", placeholder:"(qualquer)", list:"dlSublocais", style:"width:110px;border:1px solid var(--cinza-300);border-radius:5px;padding:4px 6px;font-size:11.5px;flex-shrink:0;"});
   inpSublocal.addEventListener("change", ()=>{
@@ -3593,8 +3653,11 @@ function linhaServicoArvore(map, servicosDoPacote){
     title: `Essa linha só vale pras casas: ${map.casas.join(", ")} — foi criada resolvendo casas selecionadas em Pendências.`
   },[`casas: ${map.casas.length}`]) : null;
 
+  const info = [inpServico, linhaFormulario];
+  if(abertoAlt) info.push(blocoFormulariosAlternativos(map));
+
   return el("div",{class:"linha-servico"},[
-    el("div",{class:"info"},[inpServico, inpFormulario]),
+    el("div",{class:"info"},info),
     el("div",{style:"display:flex;gap:6px;align-items:center;"},[
       botoesOrdem(servicosDoPacote, map),
       badgeObs,
@@ -5539,7 +5602,7 @@ function situacaoFvsItem(casaUau, mapa){
   const feitos = casaMobuss ? (idx.feitos.get(casaMobuss+"__"+mapa.pacoteId) || new Set()) : new Set();
   if(feitos.has("*")) return { comFvs:true, faltando:[], motivo:"" };
   const faltandoRegras = necessarias.filter(m => !feitos.has(m.id));
-  const faltando = [...new Set(faltandoRegras.map(m=>m.formulario).filter(Boolean))];
+  const faltando = [...new Set(faltandoRegras.map(rotuloFormulariosRegra).filter(Boolean))];
   if(necessarias.length > 0 && faltandoRegras.length === 0) return { comFvs:true, faltando:[], motivo:"" };
   const pacote = cfg.pacotes.find(p=>p.id===mapa.pacoteId);
   return { comFvs:false, faltando, motivo: `FVS de "${pacote?pacote.nome:"?"} / ${mapa.servico}" ainda não Encerrada` };
@@ -6588,7 +6651,7 @@ function colunasServicoDoPacote(pacoteId){
 // pra 2 formulários FVS diferentes) — isso é o que faz uma coluna mostrar "1/2" em vez de ✓/✕.
 // Usado pra montar uma dica explicando isso, em vez de deixar a fração sem explicação nenhuma.
 function formulariosDoRotulo(pacoteId, rotulo){
-  return [...new Set(cfg.mapeamentos.filter(m => m.pacoteId===pacoteId && (m.servico||m.formulario)===rotulo).map(m=>m.formulario))];
+  return [...new Set(cfg.mapeamentos.filter(m => m.pacoteId===pacoteId && (m.servico||m.formulario)===rotulo).map(rotuloFormulariosRegra))];
 }
 
 function renderizarCompletoNivelLista(area, pacoteId){
