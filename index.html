@@ -6426,16 +6426,17 @@ function blocoResumoPacote(pac, itensSemana, soPendentes){
       el("span",{class:"fracao"},[soPendentes ? `${linhasCasas.length} casa(s) pendente(s) de Prevision` : `${itensNovos.length} casa(s) fechada(s)`])
     ])
   ]);
-  const listaCasas = el("div",{style:"display:flex;flex-direction:column;gap:4px;margin-top:4px;"});
+  // Uma casa por chip, em grade que quebra linha (2026-09-28, pedido dela: a lista de casas fechadas
+  // ficava enorme — 26 casas viravam 26 linhas inteiras). O detalhe (serviço/empresa) que antes
+  // ficava sempre visível ao lado agora vai no tooltip (passa o mouse); clicar em qualquer chip
+  // continua abrindo o pacote no Completo, igual clicar em qualquer outro ponto do bloco.
+  const listaCasas = el("div",{style:"display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;"});
   linhasCasas.sort((a,b)=>a.item.casa.localeCompare(b.item.casa,"pt-BR",{numeric:true})).forEach(({item, servicos, todosOk}) => {
-    const detalhe = servicos.map(s => s.servico + (s.empresa ? ` (${s.empresa})` : "")).join(" · ");
-    listaCasas.appendChild(el("div",{class:"sub", style:"display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;"},[
-      el("span",{
-        class:"badge "+(todosOk?"completo":"pendente"),
-        title: todosOk ? "Já lançado no Prevision" : "Ainda falta lançar algum serviço no Prevision"
-      },[item.casa]),
-      el("span",null,[detalhe || "—"])
-    ]));
+    const detalhe = servicos.map(s => s.servico + (s.empresa ? ` (${s.empresa})` : "")).join(" · ") || "—";
+    listaCasas.appendChild(el("span",{
+      class:"badge "+(todosOk?"completo":"pendente"),
+      title: (todosOk ? "Já lançado no Prevision" : "Ainda falta lançar algum serviço no Prevision") + " — " + detalhe
+    },[item.casa]));
   });
   wrap.appendChild(listaCasas);
   return wrap;
