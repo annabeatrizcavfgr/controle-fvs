@@ -5975,18 +5975,29 @@ function renderizarMedicaoUauConteudo(){
   const podeEditar = MY_ROLE === "planejador" || !AUTH;
 
   const enriquecidos = itensMedicaoEnriquecidos();
-  const totalOk = enriquecidos.filter(it=>it.comFvs).length;
-  const totalEmEspera = enriquecidos.filter(it => medicoesEmEspera.has(chaveMedicao(it.contrato,it.boletim))).length;
-  const totalValidados = enriquecidos.filter(it => medicoesValidadas.has(chaveMedicao(it.contrato,it.boletim))).length;
   const totalSemVinculo = enriquecidos.filter(it => !it.mapa).length;
+  // Indicadores por MEDIÇÃO (contrato+boletim), não por item (pedido dela, 2026-09-28) — é assim que
+  // ela acompanha a conferência: quantas medições já validou, quantas estão paradas, quantas faltam.
+  const semFvsPorMedicao = new Map(); // chaveMedicao -> tem algum item sem FVS?
+  enriquecidos.forEach(it => {
+    if(!it.contrato) return; // mesma regra da lista de medições
+    const k = chaveMedicao(it.contrato, it.boletim);
+    semFvsPorMedicao.set(k, (semFvsPorMedicao.get(k) || false) || !it.comFvs);
+  });
+  const chavesMedicoes = [...semFvsPorMedicao.keys()];
+  const totalEmEspera = chavesMedicoes.filter(k => medicoesEmEspera.has(k) && !medicoesValidadas.has(k)).length;
+  const totalValidados = chavesMedicoes.filter(k => medicoesValidadas.has(k)).length;
+  const totalAConferir = chavesMedicoes.length - totalEmEspera - totalValidados;
+  const totalComPendenciaFvs = chavesMedicoes.filter(k => !medicoesValidadas.has(k) && semFvsPorMedicao.get(k)).length;
+  meta.textContent = `${chavesMedicoes.length} medição(ões) · ${todos.length} item(ns) medido(s) no total`;
 
   area.innerHTML = "";
   area.appendChild(el("div",{class:"cards-resumo"},[
-    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(todos.length)]), el("div",{class:"rotulo"},["Itens medidos"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalOk)]), el("div",{class:"rotulo"},["Com FVS Encerrada"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(todos.length-totalOk)]), el("div",{class:"rotulo"},["Sem FVS correspondente"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor"},[String(chavesMedicoes.length)]), el("div",{class:"rotulo"},["Medições (contrato · boletim)"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalValidados)]), el("div",{class:"rotulo"},["Validadas"])]),
+    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--cinza-700);"},[String(totalAConferir)]), el("div",{class:"rotulo"},["A conferir"])]),
     el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--amarelo);"},[String(totalEmEspera)]), el("div",{class:"rotulo"},["Em espera"])]),
-    el("div",{class:"card-num"},[el("div",{class:"valor",style:"color:var(--verde);"},[String(totalValidados)]), el("div",{class:"rotulo"},["Validados"])]),
+    el("div",{class:"card-num", title:"Medições ainda não validadas que têm pelo menos um item sem FVS Encerrada"},[el("div",{class:"valor",style:"color:var(--vermelho);"},[String(totalComPendenciaFvs)]), el("div",{class:"rotulo"},["Com item sem FVS"])]),
   ]));
   if(totalSemVinculo){
     area.appendChild(el("div",{class:"nota amarela"},[`${totalSemVinculo} item(ns) medido(s) com código ainda não vinculado a pacote/serviço — estão salvos e entram nos totais; vincule o código em "Análise por item de contrato" (acima) pra conferir a FVS deles.`]));
