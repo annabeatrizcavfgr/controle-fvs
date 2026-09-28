@@ -457,7 +457,6 @@
           <button class="seg-btn" data-modo="casa">Por casa</button>
         </div>
         <div class="espaco"></div>
-        <button class="btn secundario" id="btnPreencherMesesMedicao" title="Usa o mês do boletim da Conferência de Medição (UAU) pra preencher os serviços ainda sem mês de pagamento">Preencher meses pela medição</button>
         <button class="btn secundario" id="btnExportPagamento">Exportar CSV</button>
       </div>
       <div class="toolbar" id="toolbarPagamentoPacote">
@@ -775,7 +774,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao","btnPreencherMesesMedicao"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -4795,17 +4794,97 @@ function sugestaoMesPagamento(r){
   const ordenada = lista.slice().sort((a,b)=>a.mesMedicao.localeCompare(b.mesMedicao));
   return { mes: ordenada[0].mesMedicao, origem: [...new Set(ordenada.map(it => `Contrato ${it.contrato||"—"} · Boletim ${it.boletim||"—"} (${formatarMesAno(it.mesMedicao)})`))] };
 }
-document.getElementById("btnPreencherMesesMedicao").addEventListener("click", () => {
-  construirSugestoesMesPagamento();
-  const alvo = regrasConcluidas.map(r => ({ r, s: statusDoServico(r.chave).mesPagamento ? null : sugestaoMesPagamento(r) })).filter(x => x.s);
-  if(alvo.length === 0){ mostrarToastInfo("Nenhum serviço sem mês de pagamento tem medição correspondente na Conferência de Medição."); return; }
-  modalConfirmar("Preencher meses pela medição", `Preencher o mês de pagamento de ${alvo.length} serviço(s) com o mês do primeiro boletim que mediu cada um (Conferência de Medição)? Serviços que já têm mês preenchido não são alterados.`, () => {
-    alvo.forEach(({r, s}) => { cfg.statusServico[r.chave] = { ...statusDoServico(r.chave), mesPagamento: s.mes }; });
-    salvarConfigSemCadastroSujo();
-    renderizarPagamentoTab();
-    mostrarToastInfo(`${alvo.length} serviço(s) preenchido(s) com o mês da medição.`);
-  }, "Preencher");
-});
+// O que uma medição (contrato+boletim) faz avançar no Pagamento (2026-09-28, pedido dela: ao validar
+// uma medição, ver o que vai avançar). Para cada item medido COM FVS Encerrada, acha os serviços
+// concluídos daquela casa+pacote/serviço (casa por quadra+lote) e separa:
+//   avancam  — ainda sem mês de pagamento: recebem o mês do boletim (Data_medicao)
+//   jaPagos  — já tinham mês de pagamento (não mexe)
+//   semFvs   — item medido sem FVS Encerrada: não avança nada
+function avancoDaMedicao(itensMedicao){
+  const idx = new Map();
+  regrasConcluidas.forEach(r => {
+    const k = chaveCasaNumerica(r.casa, r.quadra);
+    const chave = (k.completa ? "C"+k.completa : "L"+k.lote)+"__"+r.pacoteId+"__"+r.servico;
+    if(!idx.has(chave)) idx.set(chave, []);
+    idx.get(chave).push(r);
+  });
+  const avancam = [], jaPagos = [], semFvs = [], vistos = new Set();
+  itensMedicao.forEach(it => {
+    if(!it.mapa) return;
+    if(!it.comFvs){ semFvs.push(it); return; }
+    const k = chaveCasaNumerica(it.casa);
+    const sufixo = "__"+it.mapa.pacoteId+"__"+it.mapa.servico;
+    const regras = (k.completa && idx.get("C"+k.completa+sufixo)) || (k.lote && idx.get("L"+k.lote+sufixo)) || [];
+    regras.forEach(r => {
+      if(vistos.has(r.chave)) return;
+      vistos.add(r.chave);
+      const mesAtual = statusDoServico(r.chave).mesPagamento;
+      if(mesAtual) jaPagos.push({ r, mes: mesAtual });
+      else if(it.mesMedicao) avancam.push({ r, mes: it.mesMedicao, item: it });
+    });
+  });
+  const ordem = (a,b) => a.r.pacoteNome.localeCompare(b.r.pacoteNome,"pt-BR") || a.r.casa.localeCompare(b.r.casa,"pt-BR",{numeric:true}) || a.r.servico.localeCompare(b.r.servico,"pt-BR");
+  avancam.sort(ordem); jaPagos.sort(ordem);
+  semFvs.sort((a,b)=>a.casa.localeCompare(b.casa,"pt-BR",{numeric:true}) || a.codigo.localeCompare(b.codigo,"pt-BR"));
+  return { avancam, jaPagos, semFvs };
+}
+function aplicarAvancoDaMedicao(avancam){
+  if(avancam.length === 0) return;
+  avancam.forEach(({r, mes}) => { cfg.statusServico[r.chave] = { ...statusDoServico(r.chave), mesPagamento: mes }; });
+  salvarConfigSemCadastroSujo();
+  renderizarPagamentoTab();
+}
+// Caixa que mostra o que a medição faz avançar. modo "validar": botões de validar (com ou sem
+// preencher os meses); modo "preencher": só preenche os meses, sem validar.
+function abrirModalAvancoMedicao(itensMedicao, contrato, boletim, modo, aoValidar){
+  const { avancam, jaPagos, semFvs } = avancoDaMedicao(itensMedicao);
+  const tabela = (cabecalhos, linhas) => el("div",{class:"tabela-wrap",style:"max-height:200px;margin-bottom:10px;"},[
+    el("table",{class:"tbl"},[
+      el("thead",null,[el("tr",null,cabecalhos.map(c=>el("th",null,[c])))]),
+      el("tbody",null, linhas.map(l => el("tr",null,l.map(v=>el("td",null,[v])))))
+    ])
+  ]);
+  const titulo = (txt, cor) => el("div",{style:`font-weight:700;font-size:12.5px;margin:10px 0 4px;color:${cor};`},[txt]);
+  const corpo = [];
+  if(avancam.length){
+    corpo.push(titulo(`Vai avançar no Pagamento: ${avancam.length} serviço(s)`, "var(--verde)"));
+    corpo.push(tabela(["Casa","Pacote","Serviço","Mês de pagamento"], avancam.map(({r,mes}) => [r.casa, r.pacoteNome, r.servico, formatarMesAno(mes)])));
+  } else {
+    corpo.push(el("div",{class:"sub",style:"margin:6px 0 10px;"},["Nenhum serviço novo pra avançar no Pagamento com esta medição."]));
+  }
+  if(semFvs.length){
+    corpo.push(titulo(`Não avança — item medido sem FVS Encerrada: ${semFvs.length}`, "var(--vermelho)"));
+    corpo.push(tabela(["Casa","Código","Serviço","FVS faltando"], semFvs.map(it => [it.casa, it.codigo, it.mapa.servico, (it.faltando||[]).join(", ") || "—"])));
+  }
+  if(jaPagos.length){
+    corpo.push(titulo(`Já estavam com mês de pagamento (não muda): ${jaPagos.length}`, "var(--cinza-700)"));
+    corpo.push(tabela(["Casa","Pacote","Serviço","Mês já lançado"], jaPagos.map(({r,mes}) => [r.casa, r.pacoteNome, r.servico, formatarMesAno(mes)])));
+  }
+  const overlay = el("div",{class:"modal-overlay"});
+  const fechar = () => fecharModal(overlay);
+  const botoes = [el("button",{class:"btn secundario pequeno", onclick:fechar},["Cancelar"])];
+  if(modo === "validar"){
+    if(avancam.length) botoes.push(el("button",{class:"btn secundario pequeno", onclick:()=>{ fechar(); aoValidar(); }},["Só validar"]));
+    botoes.push(el("button",{class:"btn pequeno", onclick:()=>{
+      fechar(); aplicarAvancoDaMedicao(avancam); aoValidar();
+      mostrarToastInfo(avancam.length ? `Medição validada — ${avancam.length} serviço(s) avançaram no Pagamento.` : "Medição validada.");
+    }},[avancam.length ? "Validar e avançar Pagamento" : "Validar"]));
+  } else if(avancam.length){
+    botoes.push(el("button",{class:"btn pequeno", onclick:()=>{
+      fechar(); aplicarAvancoDaMedicao(avancam); renderizarMedicaoUau();
+      mostrarToastInfo(`${avancam.length} serviço(s) avançaram no Pagamento.`);
+    }},["Preencher meses"]));
+  }
+  overlay.appendChild(el("div",{class:"modal-caixa larga", style:"max-width:760px;"},[
+    el("h4",null,[`${modo === "validar" ? "Validar" : "Preencher meses —"} Contrato ${contrato} · Boletim ${boletim||"—"}`]),
+    el("p",null,["Serviços concluídos (FVS Encerrada) que esta medição pagou recebem o mês do boletim como mês de pagamento. Serviços que já têm mês não são alterados."]),
+    ...corpo,
+    el("div",{class:"modal-acoes"}, botoes)
+  ]));
+  overlay._onKeydown = e => { if(e.key === "Escape") fechar(); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
 
 function linhaPagamentoRegra(r){
   const status = statusDoServico(r.chave);
@@ -5908,9 +5987,16 @@ function renderizarDetalheContrato(area, enriquecidos, medicaoAlvo){
           if(emEspera) medicoesEmEspera.delete(chave); else medicoesEmEspera.add(chave);
           salvarMedicaoUau(); renderizarMedicaoUau();
         }},[emEspera ? "▶ Retomar conferência" : "⏸ Colocar em espera"]) : null,
-      podeEditar ? el("button",{class:"btn secundario pequeno", onclick:()=>{
-        if(validado) medicoesValidadas.delete(chave); else medicoesValidadas.add(chave);
-        salvarMedicaoUau(); renderizarMedicaoUau();
+      podeEditar ? el("button",{class:"btn secundario pequeno", title:"Mostra quais serviços desta medição ainda não têm mês de pagamento e preenche com o mês do boletim", onclick:()=>{
+        abrirModalAvancoMedicao(itensMedicao, contrato, boletim, "preencher");
+      }},["Preencher meses pela medição"]) : null,
+      podeEditar ? el("button",{class: validado ? "btn secundario pequeno" : "btn pequeno", onclick:()=>{
+        if(validado){ medicoesValidadas.delete(chave); salvarMedicaoUau(); renderizarMedicaoUau(); return; }
+        // antes de validar, mostra o que essa medição faz avançar no Pagamento
+        abrirModalAvancoMedicao(itensMedicao, contrato, boletim, "validar", () => {
+          medicoesValidadas.add(chave); medicoesEmEspera.delete(chave);
+          salvarMedicaoUau(); renderizarMedicaoUau();
+        });
       }},[validado ? "Desmarcar validado" : "Marcar como validado"]) : null,
       podeEditar ? el("button",{class:"btn perigo pequeno", onclick:()=>{
         modalConfirmar("Excluir medição inteira", `Excluir os ${itensMedicao.length} item(ns) do Contrato ${contrato} · Boletim ${boletim||"—"}? Logo depois aparece a opção de desfazer.`, () => {
