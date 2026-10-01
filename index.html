@@ -1306,6 +1306,21 @@ function migrarCategoriaParaVagao(){
   });
 }
 
+// Migração 2026-10-01: "Sem avanço" era um flag do PACOTE inteiro; ela pediu que fosse por SERVIÇO
+// (um pacote pode ter FVS que são avanço físico de verdade junto com FVS que só comprovam
+// pagamento). Pacotes já marcados viram todas as suas linhas de mapeamento marcadas, preservando o
+// comportamento de antes sem perder nada.
+function migrarSemAvancoParaServico(){
+  let mudou = false;
+  cfg.pacotes.forEach(pac => {
+    if(!pac.semPrevision) return;
+    cfg.mapeamentos.filter(m=>m.pacoteId===pac.id).forEach(m => { if(!m.semPrevision){ m.semPrevision = true; mudou = true; } });
+    delete pac.semPrevision;
+    mudou = true;
+  });
+  return mudou;
+}
+
 /* ===================== Sincronização entre pessoas (2026-09-27) =====================
    Antes, cada clique regravava o documento inteiro (cfg ou medicaoUau) com o que ESTE navegador
    tinha na memória — se ela e a Caroline estivessem com o app aberto ao mesmo tempo, quem salvasse
@@ -1533,6 +1548,7 @@ async function carregarConfig(){
       cfg.descricoesUau = parsed.descricoesUau || {};
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
+      if(migrarSemAvancoParaServico()) precisaSalvar = true;
       if(converterVersoesParaDelta()) precisaSalvar = true;
       const nomesCorrigidos = corrigirPacotesOrfaos();
       if(nomesCorrigidos.length){
@@ -1775,14 +1791,21 @@ function statusDoServico(chave){
   return cfg.statusServico[chave] || { previsionLancado:false, previsionData:null, mesPagamento:"" };
 }
 
-// Pacote marcado "Sem avanço" (ver checkbox no Cadastro) — continua aparecendo normalmente em
-// Prevision/Completo/Resumo/Pagamento e na Conferência de Medição (pra medição, um pacote assim é
-// igual a qualquer outro: tem FVS ou não tem); só ganha o selo "SEM AVANÇO" na aba Prevision, pra
-// lembrar que aquilo ali não deveria ser lançado no Prevision de verdade — só serve pra ela saber
-// que chegou e pra bater com a Conferência de Medição.
+// Serviço marcado "Sem avanço" (ver checkbox em cada linha, no Cadastro — até 2026-10-01 era um
+// flag do pacote inteiro) — continua aparecendo normalmente em Completo/Resumo/Pagamento e na
+// Conferência de Medição (pra medição, é um serviço igual a qualquer outro: tem FVS ou não tem); só
+// ganha o selo "SEM AVANÇO" na aba Prevision, pra lembrar que aquele serviço não deveria ser
+// lançado no Prevision de verdade — só serve pra ela saber que chegou e pra bater com a medição.
+// Avanço manual (r.manual) nunca é "sem avanço" — ele não tem uma linha de mapeamento por trás.
 function regraSemPrevision(r){
-  const pac = cfg.pacotes.find(p=>p.id===r.pacoteId);
-  return !!(pac && pac.semPrevision);
+  if(r.manual) return false;
+  const m = cfg.mapeamentos.find(x=>x.id===r.regraId);
+  return !!(m && m.semPrevision);
+}
+// true se ALGUMA linha de mapeamento desse pacote+rótulo de serviço estiver "sem avanço" — usado só
+// pra mostrar a dica "(sem avanço)" ao lado do nome na subpágina Itens de contrato.
+function servicoSemAvanco(pacoteId, rotuloServico){
+  return cfg.mapeamentos.some(m => m.pacoteId===pacoteId && (m.servico||m.formulario)===rotuloServico && m.semPrevision);
 }
 
 function atualizarStatusServico(chave, mudancas){
@@ -3554,18 +3577,6 @@ function construirNoPacote(pac, busca){
         });
         return sel;
       })(),
-      (()=>{
-        const chk = el("input",{type:"checkbox"});
-        chk.checked = !!pac.semPrevision;
-        chk.addEventListener("click", e=>e.stopPropagation());
-        chk.addEventListener("change", ()=>{
-          pac.semPrevision = chk.checked;
-          marcarCadastroSujo(); renderizarArvoreCadastro();
-        });
-        const lbl = el("label",{style:"display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--cinza-700);white-space:nowrap;cursor:pointer;", title:"Esse pacote aparece na aba Prevision com o selo \"SEM AVANÇO\" — usa isso pra FVS que só servem pra comprovar pagamento (medição), sem contar como avanço físico de verdade."},[chk,"Sem avanço"]);
-        lbl.addEventListener("click", e=>e.stopPropagation());
-        return lbl;
-      })(),
       el("button",{class:"btn perigo pequeno", onclick:(e)=>{ e.stopPropagation();
         modalConfirmar("Remover pacote", `Remover o pacote "${pac.nome}"?`+(servicos.length?` Os ${servicos.length} serviço(s) dele também serão removidos.`:""), ()=>{
           cfg.pacotes = cfg.pacotes.filter(p=>p.id!==pac.id);
@@ -3713,6 +3724,22 @@ function linhaServicoArvore(map, servicosDoPacote){
     title: `Essa linha só vale pras casas: ${map.casas.join(", ")} — foi criada resolvendo casas selecionadas em Pendências.`
   },[`casas: ${map.casas.length}`]) : null;
 
+  // "Sem avanço" (2026-10-01, pedido dela: era do PACOTE inteiro, mas um pacote pode ter FVS reais
+  // de avanço físico junto com FVS que só comprovam pagamento — agora é por SERVIÇO/linha) — aparece
+  // no Prevision com o selo "SEM AVANÇO" (não deveria ser lançado de verdade), mas continua contando
+  // normal na Conferência de Medição.
+  const chkSemAvanco = el("input",{type:"checkbox"});
+  chkSemAvanco.checked = !!map.semPrevision;
+  chkSemAvanco.addEventListener("click", e=>e.stopPropagation());
+  chkSemAvanco.addEventListener("change", ()=>{
+    map.semPrevision = chkSemAvanco.checked;
+    marcarCadastroSujo(); renderizarArvoreCadastro();
+  });
+  const lblSemAvanco = el("label",{style:"display:flex;align-items:center;gap:4px;font-size:11px;color:var(--cinza-700);white-space:nowrap;cursor:pointer;flex-shrink:0;",
+    title:"Esse serviço aparece na aba Prevision com o selo \"SEM AVANÇO\" — usa isso pra uma FVS que só serve pra comprovar pagamento (medição), sem contar como avanço físico de verdade."
+  },[chkSemAvanco,"Sem avanço"]);
+  lblSemAvanco.addEventListener("click", e=>e.stopPropagation());
+
   const info = [inpServico, linhaFormulario];
   if(abertoAlt) info.push(blocoFormulariosAlternativos(map));
 
@@ -3722,6 +3749,7 @@ function linhaServicoArvore(map, servicosDoPacote){
       botoesOrdem(servicosDoPacote, map),
       badgeObs,
       badgeCasas,
+      lblSemAvanco,
       inpSublocal,
       el("button",{class:"btn perigo pequeno", onclick:()=>{
         cfg.mapeamentos = cfg.mapeamentos.filter(m=>m.id!==map.id);
@@ -5508,12 +5536,13 @@ function renderizarMapeamentoMedicaoConteudo(){
     }},[el("span",{class:"seta"},[aberto?"▾":"▸"]), ...conteudo]) };
   };
   // dentro de um pacote aberto: Serviço > códigos (serviço só como subtítulo, sem recolher)
-  function renderizarCodigos(itens, destino){
+  function renderizarCodigos(pacoteIdDoGrupo, itens, destino){
     const porServico = new Map();
     itens.forEach(m => { const k = m.servico || "(sem serviço)"; if(!porServico.has(k)) porServico.set(k, []); porServico.get(k).push(m); });
     [...porServico.entries()].sort((a,b)=>a[0].localeCompare(b[0],"pt-BR")).forEach(([servico, ms]) => {
       if(busca && mostrados >= LIMITE_ITENS_CONTRATO_BUSCA) return;
-      destino.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--vinho);margin:8px 0 4px 34px;"},[servico]));
+      const semAvanco = pacoteIdDoGrupo && servicoSemAvanco(pacoteIdDoGrupo, servico);
+      destino.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--vinho);margin:8px 0 4px 34px;"},[servico + (semAvanco ? " (sem avanço)" : "")]));
       ms.sort((a,b)=>a.codigo.localeCompare(b.codigo,"pt-BR")).forEach(m => {
         if(busca && mostrados >= LIMITE_ITENS_CONTRATO_BUSCA) return;
         mostrados++;
@@ -5534,9 +5563,9 @@ function renderizarMapeamentoMedicaoConteudo(){
     pacotesComItens.forEach(pac => {
       if(gv.aberto){
         const itens = porPacote.get(pac.id);
-        const gp = cabGrupo("p:"+pac.id, [nomeColorido(pac.nome + (pac.semPrevision ? " (sem avanço)" : "")), el("span",{class:"meta-no"},[`${itens.length} código(s)`])], 2);
+        const gp = cabGrupo("p:"+pac.id, [nomeColorido(pac.nome), el("span",{class:"meta-no"},[`${itens.length} código(s)`])], 2);
         area.appendChild(gp.cab);
-        if(gp.aberto) renderizarCodigos(itens, area);
+        if(gp.aberto) renderizarCodigos(pac.id, itens, area);
       }
       porPacote.delete(pac.id);
     });
@@ -5545,7 +5574,7 @@ function renderizarMapeamentoMedicaoConteudo(){
     const restantes = [...porPacote.values()].flat();
     const gx = cabGrupo("v:__excluido", [el("b",null,["Pacote excluído"]), el("span",{class:"meta-no"},[`${restantes.length} código(s) — vincule de novo`])], 1);
     area.appendChild(gx.cab);
-    if(gx.aberto) renderizarCodigos(restantes, area);
+    if(gx.aberto) renderizarCodigos(null, restantes, area);
   }
   if(busca && filtrados.length > mostrados){
     area.appendChild(el("div",{class:"sub",style:"padding:8px;"},[`Mostrando ${mostrados} de ${filtrados.length} códigos — refine a busca pra ver os outros.`]));
