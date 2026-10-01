@@ -353,6 +353,25 @@
 
     <div class="painel">
       <div class="cad-secao" style="margin-bottom:0;">
+        <div class="cad-secao-cab" id="cabSecaoAtributosCasa">
+          <span class="seta-secao" id="seta-secaoAtributosCasa">▸</span>
+          <h3>Atributos das casas (tipologia, fachada, etc.)</h3>
+        </div>
+        <div id="secaoAtributosCasa" style="display:none;">
+          <div class="sub" style="margin-top:-2px;margin-bottom:10px;">
+            Envie uma planilha com uma linha por casa (ex.: "Consulta de kits e fachadas") — qualquer planilha com colunas como Tipologia, Fachada, Planta etc. Depois, em cada serviço (Estrutura abaixo), você pode restringir pra só valer pras casas com certo valor nessas colunas — ex.: Escada Marinheiro só pras casas com Tipologia "SOBRADO...", não nas térreas.
+          </div>
+          <div class="dropzone" id="dropzoneAtributosCasa" style="padding:14px;">
+            <div><strong>Clique para escolher</strong> ou arraste aqui a planilha</div>
+            <input type="file" id="inputAtributosCasa" accept=".xlsx,.xls">
+          </div>
+          <div id="resumoAtributosCasa" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="painel">
+      <div class="cad-secao" style="margin-bottom:0;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
           <h3 style="margin:0;">Estrutura: Vagão → Pacote → Serviço</h3>
           <button class="btn" id="btnSalvarCadastro">Salvar alterações</button>
@@ -1282,7 +1301,15 @@ let cfg = {
   versoes: [],             // {id, data (ISO), rotulo, chaves:[...]} — snapshots arquivados, do mais antigo pro mais recente
   statusServico: {},        // { [chaveRegra]: {previsionLancado, previsionData, mesPagamento} } — ver chaveRegra()
   mapeamentosMedicao: [],   // {id, codigo (ex.: "S00296"), pacoteId, servico} — ver Conferência de Medição (UAU)
-  descricoesUau: {}         // { [codigo]: descrição do item de contrato, ex.: "S00296": "(FRISO NEGATIVO)..." } — guardada de qualquer colagem que traga a linha de descrição, mesmo antes do código ser mapeado
+  descricoesUau: {},        // { [codigo]: descrição do item de contrato, ex.: "S00296": "(FRISO NEGATIVO)..." } — guardada de qualquer colagem que traga a linha de descrição, mesmo antes do código ser mapeado
+  // ATRIBUTOS DA CASA (2026-10-01, pedido dela: variações como "não tem escada marinheiro em casas
+  // térreas" — importados de QUALQUER planilha dela com uma linha por casa, ex. "Consulta de Kits e
+  // Fachadas"). atributosCasa é indexado pela chave numérica quadra-lote (ver chaveCasaNumerica) pra
+  // casar com a casa do MOBUSS mesmo que o formato do texto seja um pouco diferente.
+  atributosCasa: {},        // { [chaveNumericaCasa]: { "Tipologia":"TR3Q1S", "Fachada":"FACHADA AROEIRA I", ... } }
+  atributosCasaColunas: [],  // string[] — nomes das colunas importadas (pra popular os seletores)
+  atributosCasaColunaId: "", // nome da coluna que foi usada como identificador da casa na última importação
+  atributosCasaAtualizadoEm: null
 };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -1477,9 +1504,10 @@ function aplicarCfgMesclado(m){
   const baselineAnterior = cadastroBaseline;
   cacheBaseline = null;
   Object.keys(m).forEach(k => { if(!(cadastroSujo && CAMPOS_CADASTRO.includes(k))) cfg[k] = m[k]; });
-  ["vagoes","pacotes","mapeamentos","avancosManuais","knownFormularios","knownSublocais","versoes","mapeamentosMedicao"].forEach(k => { if(!Array.isArray(cfg[k])) cfg[k] = []; });
+  ["vagoes","pacotes","mapeamentos","avancosManuais","knownFormularios","knownSublocais","versoes","mapeamentosMedicao","atributosCasaColunas"].forEach(k => { if(!Array.isArray(cfg[k])) cfg[k] = []; });
   if(!ehObjetoSimples(cfg.statusServico)) cfg.statusServico = {};
   if(!ehObjetoSimples(cfg.descricoesUau)) cfg.descricoesUau = {};
+  if(!ehObjetoSimples(cfg.atributosCasa)) cfg.atributosCasa = {};
   if(cadastroSujo && baselineAnterior){
     // edição de Cadastro pela metade: re-aplica a edição dela por cima do que chegou
     CAMPOS_CADASTRO.forEach(k => { cfg[k] = mesclar3(baselineAnterior[k], cfg[k], m[k]||[]) || []; });
@@ -1546,6 +1574,10 @@ async function carregarConfig(){
       cfg.statusServico = parsed.statusServico || {};
       cfg.mapeamentosMedicao = parsed.mapeamentosMedicao || [];
       cfg.descricoesUau = parsed.descricoesUau || {};
+      cfg.atributosCasa = parsed.atributosCasa || {};
+      cfg.atributosCasaColunas = parsed.atributosCasaColunas || [];
+      cfg.atributosCasaColunaId = parsed.atributosCasaColunaId || "";
+      cfg.atributosCasaAtualizadoEm = parsed.atributosCasaAtualizadoEm || null;
       migrarStatusServicoParaCasaUnica();
       migrarCategoriaParaVagao();
       if(migrarSemAvancoParaServico()) precisaSalvar = true;
@@ -2243,8 +2275,10 @@ function entradasParaPacote(pac){
 function calcularItemPacoteCasa(pac, entrada){
   // regras casa-específicas (regra.casas, ver regraCombinaCasa) só contam como "necessárias" pras
   // casas que elas de fato cobrem — senão uma regra criada pra 2 casas apareceria como requisito
-  // faltando pra TODAS as outras casas desse pacote, que nunca poderiam cumpri-la.
-  const regras = regrasNecessarias(pac.id, entrada.sublocal).filter(r => regraCombinaCasa(r, entrada));
+  // faltando pra TODAS as outras casas desse pacote, que nunca poderiam cumpri-la. O mesmo vale pra
+  // regra.restricaoAtributo (ver regraCombinaAtributo) — ex.: um serviço que só existe em casas com
+  // determinada Tipologia/Fachada importada (ver Atributos das casas no Cadastro).
+  const regras = regrasNecessarias(pac.id, entrada.sublocal).filter(r => regraCombinaCasa(r, entrada) && regraCombinaAtributo(r, entrada));
   if(regras.length === 0) return null; // pacote não se aplica a este sublocal
 
   const regrasFeitas = regras.filter(r => regraAtendida(r, entrada));
@@ -3186,6 +3220,202 @@ function tratarImportacaoPacotes(fileList){
   }, 30);
 }
 
+/* ===================== Atributos das casas (tipologia, fachada, etc.) =====================
+   2026-10-01, pedido dela: algumas variações de casa não têm todos os serviços de um pacote (ex.:
+   "escada marinheiro" não existe em casas térreas). Em vez de adivinhar um padrão pelo número da
+   casa, ela importa QUALQUER planilha dela com uma linha por casa (ex.: "Consulta de kits e
+   fachadas" — colunas como Tipologia, Fachada, Planta, Status Unidade…), escolhe qual coluna
+   identifica a casa (aqui pode não se chamar "Casa" — no arquivo dela quem identifica é "Lote"), e
+   todas as OUTRAS colunas viram atributos que qualquer serviço no Cadastro pode usar pra se
+   restringir a só algumas casas (ver regraCombinaAtributo). A casa é casada pela chave numérica
+   quadra-lote (mesma de chaveCasaNumerica, usada na Conferência de Medição), pra funcionar mesmo
+   que o texto da casa seja escrito um pouco diferente entre essa planilha e o MOBUSS. */
+function lerPrimeiraAbaComoTabela(workbook){
+  const nomeAba = workbook.SheetNames[0];
+  const aoa = XLSX.utils.sheet_to_json(workbook.Sheets[nomeAba], { header:1, raw:false, defval:"" });
+  if(!aoa || aoa.length < 2) return { erro: "A planilha parece vazia (menos de 2 linhas)." };
+  const cabecalho = aoa[0].map(h => normTexto(h));
+  if(cabecalho.some(h=>!h)) return { erro: "O cabeçalho (1ª linha) tem alguma coluna sem nome — preencha todas as colunas antes de importar." };
+  const linhas = aoa.slice(1).filter(l => l.some(c => normTexto(c) !== ""));
+  return { nomeAba, cabecalho, linhas };
+}
+let tabelaAtributosCasaPendente = null; // guarda a tabela lida, enquanto ela escolhe a coluna-id no modal
+function abrirModalEscolherColunaId(tabela){
+  const { cabecalho, linhas } = tabela;
+  // chute inicial: alguma coluna com "lote" ou "casa" no nome; senão a primeira
+  const chuteIdx = cabecalho.findIndex(h => /lote/i.test(h)) >= 0 ? cabecalho.findIndex(h => /lote/i.test(h))
+    : (cabecalho.findIndex(h => /casa/i.test(h)) >= 0 ? cabecalho.findIndex(h => /casa/i.test(h)) : 0);
+  const sel = el("select",null, cabecalho.map((h,i)=>el("option",{value:String(i)},[h])));
+  sel.value = String(chuteIdx);
+  const previa = el("div",{class:"tabela-wrap", style:"max-height:160px;margin-top:10px;"});
+  function redesenharPrevia(){
+    const idx = parseInt(sel.value,10);
+    previa.innerHTML = "";
+    const tbl = el("table",{class:"tbl"},[
+      el("thead",null,[el("tr",null,cabecalho.map((h,i)=>el("th",{style: i===idx?"color:var(--vinho);":""},[h])))]),
+      el("tbody",null, linhas.slice(0,4).map(l => el("tr",null, cabecalho.map((h,i)=>el("td",{style: i===idx?"font-weight:700;":""},[normTexto(l[i])])))))
+    ]);
+    previa.appendChild(tbl);
+  }
+  sel.addEventListener("change", redesenharPrevia);
+  redesenharPrevia();
+  const overlay = el("div",{class:"modal-overlay"},[
+    el("div",{class:"modal-caixa larga"},[
+      el("h4",null,["Qual coluna identifica a casa?"]),
+      el("p",null,[`"${tabela.nomeAba}" tem ${linhas.length} linha(s). Escolha a coluna cujo valor é a casa/lote (ex.: "15-10") — as outras colunas viram atributos disponíveis pra restringir serviços.`]),
+      sel, previa,
+      el("div",{class:"modal-acoes"},[
+        el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
+        el("button",{class:"btn pequeno", onclick:()=>{ fecharModal(overlay); processarImportacaoAtributosCasa(tabela, parseInt(sel.value,10)); }},["Importar"])
+      ])
+    ])
+  ]);
+  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
+function processarImportacaoAtributosCasa(tabela, idxColunaId){
+  const { cabecalho, linhas } = tabela;
+  const colunaId = cabecalho[idxColunaId];
+  const outrasColunas = cabecalho.filter((_,i)=>i!==idxColunaId);
+  const atributos = {};
+  let casasReconhecidas = 0, casasIgnoradas = 0;
+  linhas.forEach(l => {
+    const chave = chaveCasaNumerica(l[idxColunaId]).completa;
+    if(!chave){ casasIgnoradas++; return; }
+    casasReconhecidas++;
+    const attrs = {};
+    cabecalho.forEach((h,i) => { if(i!==idxColunaId) attrs[h] = normTexto(l[i]); });
+    atributos[chave] = attrs;
+  });
+  cfg.atributosCasa = atributos;
+  cfg.atributosCasaColunas = outrasColunas;
+  cfg.atributosCasaColunaId = colunaId;
+  cfg.atributosCasaAtualizadoEm = new Date().toISOString();
+  salvarConfigSemCadastroSujo();
+  recalcularTudo();
+  renderizarResumoAtributosCasa();
+  mostrarToastInfo(`${casasReconhecidas} casa(s) importada(s)${casasIgnoradas?` (${casasIgnoradas} linha(s) com "${colunaId}" não reconhecido como casa, ignorada(s))`:""} — campos disponíveis: ${outrasColunas.join(", ")}.`);
+}
+function renderizarResumoAtributosCasa(){
+  const area = document.getElementById("resumoAtributosCasa");
+  if(!area) return;
+  area.innerHTML = "";
+  const qtd = Object.keys(cfg.atributosCasa||{}).length;
+  if(qtd === 0){
+    area.appendChild(el("div",{class:"sub"},["Nenhuma planilha importada ainda."]));
+    return;
+  }
+  area.appendChild(el("div",{class:"sub"},[
+    `${qtd} casa(s) importada(s) (coluna "${cfg.atributosCasaColunaId}" como identificador) · campos: ${cfg.atributosCasaColunas.join(", ")} · `,
+    cfg.atributosCasaAtualizadoEm ? `atualizado em ${formatarDataHora(new Date(cfg.atributosCasaAtualizadoEm))}` : ""
+  ]));
+}
+const dropzoneAtributosCasa = document.getElementById("dropzoneAtributosCasa");
+const inputAtributosCasa = document.getElementById("inputAtributosCasa");
+function tratarArquivoAtributosCasa(file){
+  mostrarLoading("Lendo planilha…");
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try{
+      const wb = XLSX.read(ev.target.result, { type:"array", cellDates:true });
+      const tabela = lerPrimeiraAbaComoTabela(wb);
+      esconderLoading();
+      if(tabela.erro){ mostrarToast(tabela.erro); return; }
+      abrirModalEscolherColunaId(tabela);
+    }catch(err){
+      esconderLoading();
+      mostrarToast(`Não foi possível ler o arquivo "${file.name}": ${err.message}`);
+    }
+  };
+  reader.onerror = () => { esconderLoading(); mostrarToast(`Não foi possível ler o arquivo "${file.name}".`); };
+  reader.readAsArrayBuffer(file);
+}
+dropzoneAtributosCasa.addEventListener("click", () => inputAtributosCasa.click());
+dropzoneAtributosCasa.addEventListener("dragover", e => { e.preventDefault(); dropzoneAtributosCasa.classList.add("arrastando"); });
+dropzoneAtributosCasa.addEventListener("dragleave", () => dropzoneAtributosCasa.classList.remove("arrastando"));
+dropzoneAtributosCasa.addEventListener("drop", e => {
+  e.preventDefault(); dropzoneAtributosCasa.classList.remove("arrastando");
+  if(e.dataTransfer.files.length) tratarArquivoAtributosCasa(e.dataTransfer.files[0]);
+});
+inputAtributosCasa.addEventListener("change", e => {
+  if(e.target.files.length) tratarArquivoAtributosCasa(e.target.files[0]);
+  e.target.value = "";
+});
+
+// Valores distintos (não vazios) que um campo de atributo assume entre as casas importadas — pra
+// montar a lista de checkboxes do modal de restrição.
+function valoresDistintosDoAtributo(campo){
+  const vistos = new Set();
+  Object.values(cfg.atributosCasa).forEach(attrs => { const v = attrs[campo]; if(v) vistos.add(v); });
+  return [...vistos].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+}
+function abrirModalRestricaoAtributo(map){
+  if(!cfg.atributosCasaColunas || cfg.atributosCasaColunas.length === 0){
+    mostrarToast("Importe uma planilha em \"Atributos das casas\" (no topo do Cadastro) antes de restringir um serviço por ela.");
+    return;
+  }
+  const atual = map.restricaoAtributo;
+  const sel = el("select",null, cfg.atributosCasaColunas.map(c=>el("option",{value:c},[c])));
+  sel.value = (atual && atual.campo) || cfg.atributosCasaColunas[0];
+  const lista = el("div",{class:"chips-editor", style:"max-height:220px;overflow:auto;display:block;"});
+  function redesenharLista(){
+    lista.innerHTML = "";
+    const valores = valoresDistintosDoAtributo(sel.value);
+    const marcados = new Set((sel.value === (atual&&atual.campo)) ? (atual.valores||[]) : []);
+    if(valores.length === 0){
+      lista.appendChild(el("div",{class:"sub"},["Nenhum valor encontrado pra esse campo nas casas importadas."]));
+      return;
+    }
+    valores.forEach(v => {
+      const chk = el("input",{type:"checkbox"});
+      chk.checked = marcados.has(v);
+      chk.dataset.valor = v;
+      lista.appendChild(el("label",{style:"display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12.5px;"},[chk, v]));
+    });
+  }
+  sel.addEventListener("change", redesenharLista);
+  redesenharLista();
+  const overlay = el("div",{class:"modal-overlay"},[
+    el("div",{class:"modal-caixa"},[
+      el("h4",null,[`Restringir "${map.servico||map.formulario}"`]),
+      el("p",null,["Esse serviço só vai ser exigido nas casas cujo valor, no campo escolhido, esteja marcado abaixo. Casas sem esse atributo importado continuam exigindo normalmente."]),
+      el("div",{class:"form-field"},[el("label",null,["Campo"]), sel]),
+      lista,
+      el("div",{class:"modal-acoes", style:"justify-content:space-between;"},[
+        atual ? el("button",{class:"btn perigo pequeno", onclick:()=>{
+          delete map.restricaoAtributo;
+          fecharModal(overlay); marcarCadastroSujo(); renderizarArvoreCadastro();
+        }},["Remover restrição"]) : el("span"),
+        el("div",{style:"display:flex;gap:8px;"},[
+          el("button",{class:"btn secundario pequeno", onclick:()=>fecharModal(overlay)},["Cancelar"]),
+          el("button",{class:"btn pequeno", onclick:()=>{
+            const valores = [...lista.querySelectorAll('input[type=checkbox]:checked')].map(c=>c.dataset.valor);
+            if(valores.length === 0){ mostrarToast("Marque pelo menos um valor, ou clique em \"Remover restrição\"."); return; }
+            map.restricaoAtributo = { campo: sel.value, valores };
+            fecharModal(overlay); marcarCadastroSujo(); renderizarArvoreCadastro();
+          }},["Salvar"])
+        ])
+      ])
+    ])
+  ]);
+  overlay._onKeydown = e => { if(e.key === "Escape") fecharModal(overlay); };
+  document.addEventListener("keydown", overlay._onKeydown);
+  document.body.appendChild(overlay);
+}
+
+// true se a REGRA não tiver restrição, ou se a casa bater com o valor exigido pra aquele campo —
+// casa sem atributo importado nunca é excluída (evita esconder pendência de verdade por falta de
+// dado — ela precisa manter a planilha de atributos atualizada conforme casas novas entram).
+function regraCombinaAtributo(regra, casaOuObjComCasa){
+  const r = regra.restricaoAtributo;
+  if(!r || !r.campo || !r.valores || r.valores.length===0) return true;
+  const chave = chaveCasaNumerica(casaOuObjComCasa.casa).completa;
+  const attrs = chave && cfg.atributosCasa[chave];
+  if(!attrs) return true;
+  return r.valores.includes(attrs[r.campo]);
+}
+
 /* ===================== Navegação por abas ===================== */
 // Algumas telas (Resumo, Completo) mostram status de Prevision/pagamento que muda em outra aba
 // sem passar por recalcularTudo() — sempre redesenha a aba ao entrar nela pra nunca mostrar dado velho.
@@ -3348,6 +3578,7 @@ function renderizarCadastro(){
   preencherDatalist("dlSublocais", cfg.knownSublocais);
   renderizarArvoreCadastro();
   atualizarBotaoSalvarCadastro();
+  renderizarResumoAtributosCasa();
 }
 
 function pacoteCorresponde(pac, busca){
@@ -3707,6 +3938,14 @@ function linhaServicoArvore(map, servicosDoPacote){
   },[qtdAlt ? `${qtdAlt} OU ${abertoAlt?"▴":"▾"}` : "+ OU"]);
   const linhaFormulario = el("div",{style:"display:flex;align-items:center;gap:4px;"},[inpFormulario, btnAlt]);
 
+  // "Só se aplica a certas casas" (2026-10-01, pedido dela: variações como escada marinheiro não
+  // existir em casas térreas) — restringe pelos atributos importados em "Atributos das casas".
+  const restricao = map.restricaoAtributo;
+  const btnRestricao = el("button",{class: restricao ? "btn secundario pequeno" : "btn secundario pequeno", style:"font-size:10.5px;padding:1px 6px;flex-shrink:0;",
+    title: restricao ? `Só exigido quando "${restricao.campo}" é: ${restricao.valores.join(", ")} — clique pra editar` : "Restringir esse serviço só a algumas casas, pelos atributos importados (Tipologia, Fachada, etc.)",
+    onclick: () => abrirModalRestricaoAtributo(map)
+  },[restricao ? `${restricao.campo}: ${restricao.valores.length} ▾` : "+ restringir casa"]);
+
   const inpSublocal = el("input",{value:map.sublocal||"", placeholder:"(qualquer)", list:"dlSublocais", style:"width:110px;border:1px solid var(--cinza-300);border-radius:5px;padding:4px 6px;font-size:11.5px;flex-shrink:0;"});
   inpSublocal.addEventListener("change", ()=>{
     map.sublocal = normTexto(inpSublocal.value).toUpperCase();
@@ -3750,6 +3989,7 @@ function linhaServicoArvore(map, servicosDoPacote){
       badgeObs,
       badgeCasas,
       lblSemAvanco,
+      btnRestricao,
       inpSublocal,
       el("button",{class:"btn perigo pequeno", onclick:()=>{
         cfg.mapeamentos = cfg.mapeamentos.filter(m=>m.id!==map.id);
@@ -3798,6 +4038,14 @@ document.getElementById("btnSalvarCadastro").addEventListener("click", () => {
   recalcularTudo();
   atualizarBotaoSalvarCadastro();
   mostrarToast("Alterações salvas.");
+});
+
+document.getElementById("cabSecaoAtributosCasa").addEventListener("click", () => {
+  const corpo = document.getElementById("secaoAtributosCasa");
+  const seta = document.getElementById("seta-secaoAtributosCasa");
+  const oculto = corpo.style.display === "none";
+  corpo.style.display = oculto ? "" : "none";
+  seta.textContent = oculto ? "▾" : "▸";
 });
 
 document.getElementById("cabSecaoImportarPacotes").addEventListener("click", () => {
