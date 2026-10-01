@@ -401,6 +401,10 @@
         </div>
         <div id="secaoVersoes" style="display:none;">
           <div class="sub" style="margin:4px 0 10px;">Cada vez que você importa uma exportação nova do MOBUSS, o filtro "Só novos desta semana" abaixo mostra só os serviços novos desde o último "Salvar avanço". Quando terminar de revisar e lançar a semana no Prevision, clique em "Salvar avanço" abaixo — isso vira o novo ponto de partida.</div>
+          <div class="nota" id="notaReconstruirHistorico" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="flex:1;min-width:220px;">Migrando de um controle antigo com a obra já em andamento? A planilha do MOBUSS já traz a data de cada FVS — dá pra recriar o histórico semana a semana de uma vez, sem precisar subir uma planilha por semana.</span>
+            <button class="btn secundario pequeno" id="btnReconstruirHistorico">Reconstruir histórico pelas datas das FVS</button>
+          </div>
           <div id="listaVersoes"></div>
         </div>
       </div>
@@ -789,7 +793,7 @@ function updateAuthUi(){
   const isPlan = MY_ROLE === "planejador";
   // ações que gravam — escondidas pra visualizador (a gravação já é bloqueada em checkWritable(),
   // isso é só pra não oferecer um botão que ia recusar).
-  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
+  ["dropzonePacotes","dropzone","btnSalvarCadastro","btnNovoVagao","btnAvancoManual","btnArquivarVersao","btnReconstruirHistorico","colaMedicaoUau","btnProcessarMedicaoUau","btnNovoMapeamentoMedicao"].forEach(id=>{
     const elx = document.getElementById(id);
     if(elx) elx.style.display = isPlan ? "" : "none";
   });
@@ -797,6 +801,8 @@ function updateAuthUi(){
   if(btnUsuarios) btnUsuarios.style.display = isPlan ? "" : "none";
   const btnBackups = document.getElementById("btnBackups");
   if(btnBackups) btnBackups.style.display = isPlan ? "" : "none";
+  const notaReconstruir = document.getElementById("notaReconstruirHistorico");
+  if(notaReconstruir) notaReconstruir.style.display = isPlan ? "" : "none";
   const btnSair = document.getElementById("btnSair");
   if(btnSair) btnSair.style.display = CURRENT_USER ? "" : "none";
   const btnTrocarObra = document.getElementById("btnTrocarObra");
@@ -2475,6 +2481,60 @@ function abrirModalSubstituirOuSomar(versaoExistente, rotulo, qtdCompletos, qtdS
   document.addEventListener("keydown", overlay._onKeydown);
   document.body.appendChild(overlay);
 }
+
+// Reconstrução de histórico pelas datas das FVS (2026-10-01, pedido dela: migrando de um controle
+// antigo com a obra já em andamento, ela queria que o histórico semana a semana deste app batesse
+// com o que já tinha anotado — mas subir uma planilha do MOBUSS filtrada só por semana quebra o
+// cálculo de completo/parcial (pacotes com serviços de semanas diferentes perdem os mais antigos,
+// que não estão naquele arquivo). Como cada FVS no MOBUSS já tem sua própria "Data de Realização",
+// a solução é subir a exportação COMPLETA de uma vez só e deixar o app distribuir cada avanço já
+// concluído pra versão da semana em que ele realmente aconteceu — sem precisar de arquivo por
+// semana. Isso SUBSTITUI toda cfg.versoes (por isso pede confirmação); o que não tem data vira uma
+// versão "sem data" no início da linha do tempo, pra nunca ser contado como "novo".
+function reconstruirHistoricoPorData(){
+  if(avancos.length === 0 && regrasConcluidas.length === 0){
+    mostrarToast("Nada concluído ainda pra reconstruir — importe a exportação completa do MOBUSS primeiro.");
+    return;
+  }
+  const qtdAntigas = cfg.versoes.length;
+  const mensagem = (qtdAntigas
+    ? `Isso vai SUBSTITUIR as ${qtdAntigas} versão(ões) salva(s) hoje por versões novas, uma por semana, `
+    : `Isso vai criar uma versão salva pra cada semana, `
+  ) + `montadas a partir da data de cada FVS já concluída na exportação atual do MOBUSS. Use só se a exportação carregada agora for a COMPLETA da obra (não uma filtrada por período) — senão o histórico fica incompleto.`;
+  modalConfirmar("Reconstruir histórico pelas datas das FVS", mensagem, () => {
+    const buckets = new Map(); // iso da segunda-feira da semana (ou "" = sem data) -> {chaves, chavesServico}
+    function bucket(iso){
+      if(!buckets.has(iso)) buckets.set(iso, { chaves: new Set(), chavesServico: new Set() });
+      return buckets.get(iso);
+    }
+    avancos.forEach(item => {
+      const iso = item.dataConclusao ? dataLocalISO(segundaDaSemana(item.dataConclusao)) : "";
+      bucket(iso).chaves.add(chaveAvanco(item));
+    });
+    regrasConcluidas.forEach(r => {
+      const iso = r.data ? dataLocalISO(segundaDaSemana(r.data)) : "";
+      bucket(iso).chavesServico.add(r.chave);
+    });
+    const semData = buckets.get("");
+    buckets.delete("");
+    const semanasOrdenadas = [...buckets.keys()].sort(); // ISO cresce = ordem cronológica
+    const versoesNovas = [];
+    if(semData && (semData.chaves.size || semData.chavesServico.size)){
+      versoesNovas.push({ id: uid(), data: new Date().toISOString(), semana: null,
+        rotulo: "Sem data de conclusão registrada", chaves:[...semData.chaves], chavesServico:[...semData.chavesServico] });
+    }
+    semanasOrdenadas.forEach(iso => {
+      const b = buckets.get(iso);
+      versoesNovas.push({ id: uid(), data: new Date().toISOString(), semana: iso,
+        rotulo: rotuloSemana(iso), chaves:[...b.chaves], chavesServico:[...b.chavesServico] });
+    });
+    cfg.versoes = versoesNovas;
+    salvarConfigSemCadastroSujo();
+    recalcularTudo();
+    mostrarToastInfo(`Histórico reconstruído: ${versoesNovas.length} versão(ões) criada(s) a partir das datas das FVS.`);
+  }, "Reconstruir");
+}
+document.getElementById("btnReconstruirHistorico").addEventListener("click", reconstruirHistoricoPorData);
 
 function excluirVersaoArquivada(versaoId){
   const v = cfg.versoes.find(x=>x.id===versaoId);
